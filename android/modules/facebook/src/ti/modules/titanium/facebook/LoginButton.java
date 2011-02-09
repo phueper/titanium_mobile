@@ -1,45 +1,41 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2011 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
+
 package ti.modules.titanium.facebook;
 
 import java.io.InputStream;
 
-import org.appcelerator.titanium.TiDict;
-import org.appcelerator.titanium.TiModule;
-import org.appcelerator.titanium.TiProxy;
+import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.titanium.proxy.TiViewProxy;
 import org.appcelerator.titanium.util.Log;
-import org.appcelerator.titanium.util.TiConfig;
 import org.appcelerator.titanium.util.TiConvert;
 import org.appcelerator.titanium.util.TiUIHelper;
 import org.appcelerator.titanium.view.TiUIView;
 
-import ti.modules.titanium.facebook.FBSession.FBSessionDelegate;
 import android.R;
+import android.app.Activity;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.BitmapDrawable;
 import android.util.StateSet;
 import android.view.View;
-import android.view.Window;
 import android.view.View.OnClickListener;
 import android.widget.ImageButton;
 
-public class LoginButton extends TiUIView {
+public class LoginButton extends TiUIView implements TiFacebookStateListener
+{
 	private static final String LCAT = "TiLoginButton";
-	private static final boolean DBG = TiConfig.LOGD;
-
-	private FBSession session;
-	private FacebookModule facebook;
+	private FacebookModule facebook = null;
 	private boolean wide;
 
 	public LoginButton(final TiViewProxy proxy) {
 		super(proxy);
+		initFacebook();
 		ImageButton btn = new ImageButton(proxy.getContext()) {
 			@Override
 			protected void drawableStateChanged() {
@@ -49,28 +45,71 @@ public class LoginButton extends TiUIView {
 						new int[] { R.attr.state_pressed }, states)
 						|| StateSet.stateSetMatches(
 								new int[] { R.attr.state_focused }, states)) {
-					updateButtonImage(facebook.isLoggedIn(), true);
+					updateButtonImage(true);
 				} else {
-					updateButtonImage(facebook.isLoggedIn(), false);
+					updateButtonImage(false);
 				}
 			}
 		};
 		btn.setBackgroundColor(Color.TRANSPARENT);
+		final ImageButton fBtn = btn;
 		btn.setOnClickListener(new OnClickListener() {
 			public void onClick(View arg0) {
-				if (facebook.isLoggedIn()) {
-					facebook.executeLogout();
+				Activity activity = null;
+				if (fBtn.getContext() instanceof Activity) {
+					activity = (Activity) fBtn.getContext();
 				} else {
-					facebook.executeLogin();
+					Context context = getProxy().getContext();
+					if (context instanceof Activity) {
+						activity = (Activity) context;
+					}
+				}
+				if (activity == null) {
+					// Fallback on the root activity if possible
+					if (getProxy().getTiContext() != null) {
+						activity = getProxy().getTiContext().getRootActivity();
+					}
+				}
+				if (facebook.loggedIn()) {
+					facebook.executeLogout(activity);
+				} else {
+					facebook.executeAuthorize(activity);
 				}
 			}
 		});
 		setNativeView(btn);
-		updateButtonImage(false, false);
+		updateButtonImage(false);
+	}
+	
+	private void initFacebook()
+	{
+		this.facebook = ((TiFacebookModuleLoginButtonProxy)this.getProxy()).getFacebookModule();
 	}
 
-	protected void updateButtonImage(boolean loggedIn, boolean pressed) {
+	protected void updateButtonImage(boolean pressed) {
+		if (getProxy().getTiContext().isUIThread()) {
+			handleUpdateButtonImage(pressed);
+		} else {
+			final boolean fPressed = pressed;
+			getProxy().getTiContext().getActivity().runOnUiThread(new Runnable()
+			{
+				@Override
+				public void run()
+				{
+					handleUpdateButtonImage(fPressed);
+					
+				}
+			});
+		}
+	}
+
+	private void handleUpdateButtonImage(boolean pressed)
+	{
+		boolean loggedIn = facebook.loggedIn();
 		ImageButton btn = (ImageButton) getNativeView();
+		if (btn == null) {
+			return;
+		}
 		String path = "ti/modules/titanium/facebook/resources/log"
 				+ (!loggedIn ? "in" : "out") + (wide && !loggedIn ? "2" : "")
 				+ (pressed ? "_down" : "") + ".png";
@@ -82,79 +121,40 @@ public class LoginButton extends TiUIView {
 		Bitmap bitmap = TiUIHelper.createBitmap(is);
 		btn.setImageDrawable(new BitmapDrawable(bitmap));
 	}
-
+	
 	@Override
-	public void processProperties(TiDict d) {
+	public void processProperties(KrollDict d) {
 		super.processProperties(d);
 
-		facebook = (FacebookModule) TiModule.getModule("Facebook");
-		if (facebook == null) {
-			facebook = new FacebookModule(getProxy().getTiContext());
-		}
-
-		String apiKey = TiConvert.toString(d, "apikey");
-		String secret = TiConvert.toString(d, "secret");
-		String sessionProxy = TiConvert.toString(d, "sessionProxy");
-
-		final TiProxy proxy = getProxy();
-		
-		session = facebook.getOrCreateSession(apiKey, secret, sessionProxy);
-		session.getDelegates().add(new FBSessionDelegate() 
-		{
-			@Override
-		    public void sessionDidLogin(FBSession session, Long uid)
-		    {
-				Log.d(LCAT,"SESSION DID LOGIN");
-				updateButtonImage(true, false);
-				TiDict event = new TiDict();
-				event.put("success", true);
-				event.put("state", "login");
-				proxy.fireEvent("login",event);
-		    }
-			@Override
-		    public void sessionWillLogout(FBSession session, Long uid)
-		    {
-				Log.d(LCAT,"SESSION WILL LOGOUT");
-				updateButtonImage(false, false);
-		    }
-			@Override
-			public void sessionDidLogout(FBSession session)
-			{
-				Log.d(LCAT,"SESSION DID LOGOUT");
-				TiDict event = new TiDict();
-				event.put("success", true);
-				event.put("state", "logout");
-				proxy.fireEvent("logout",event);
-			}
-		});
+		facebook.addListener(this);
 
 		if (d.containsKey("style")) {
 			String style = TiConvert.toString(d, "style");
 			if (style.equals("wide")) {
 				wide = true;
-				updateButtonImage(session.isConnected(), false);
+				updateButtonImage(false);
 			}
 		}
-
-		if (!session.isConnected()) {
-			session.resume(getWinContext());
-		}
 	}
 
-	protected Context getWinContext() {
-		Window w = getProxy().getTiContext().getRootActivity().getWindow();
-		return w.getContext();
-	}
+	// TiFacebookStateListener implementation
+	@Override
+    public void login()
+    {
+		updateButtonImage(false);
+    }
+	@Override
+    public void logout()
+    {
+		updateButtonImage(false);
+    }
 
 	@Override
-	public void propertyChanged(String key, Object oldValue, Object newValue,
-			TiProxy proxy) {
-		if (DBG) {
-			Log.d(LCAT, "Property: " + key + " old: " + oldValue + " new: "
-					+ newValue);
+	public void release()
+	{
+		super.release();
+		if (facebook != null) {
+			facebook.removeListener(this);
 		}
-		
-		//FIXME
 	}
-
 }

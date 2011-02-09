@@ -6,8 +6,8 @@
  */
 package ti.modules.titanium.ui.widget;
 
-import org.appcelerator.titanium.TiDict;
-import org.appcelerator.titanium.TiProxy;
+import org.appcelerator.kroll.KrollDict;
+import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.titanium.proxy.TiViewProxy;
 import org.appcelerator.titanium.util.Log;
 import org.appcelerator.titanium.util.TiConfig;
@@ -18,6 +18,7 @@ import android.app.Activity;
 import android.app.ProgressDialog;
 import android.content.Context;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.Message;
 
 public class TiUIActivityIndicator extends TiUIView
@@ -52,7 +53,7 @@ public class TiUIActivityIndicator extends TiUIView
 		if (DBG) {
 			Log.d(LCAT, "Creating an activity indicator");
 		}
-		handler = new Handler(this);
+		handler = new Handler(Looper.getMainLooper(), this);
 	}
 
 	public boolean handleMessage(Message msg)
@@ -81,7 +82,7 @@ public class TiUIActivityIndicator extends TiUIView
 	}
 
 	@Override
-	public void processProperties(TiDict d)
+	public void processProperties(KrollDict d)
 	{
 		super.processProperties(d);
 
@@ -89,7 +90,7 @@ public class TiUIActivityIndicator extends TiUIView
 	}
 
 	@Override
-	public void propertyChanged(String key, Object oldValue, Object newValue, TiProxy proxy)
+	public void propertyChanged(String key, Object oldValue, Object newValue, KrollProxy proxy)
 	{
 		if (DBG) {
 			Log.d(LCAT, "Property: " + key + " old: " + oldValue + " new: " + newValue);
@@ -115,17 +116,16 @@ public class TiUIActivityIndicator extends TiUIView
 		}
 	}
 
-	public void show(TiDict options)
+	public void show(KrollDict options)
 	{
 		if (visible) {
 			return;
 		}
-
-		handler.sendEmptyMessage(MSG_SHOW);
+		handleShow();
 	}
 
 	protected void handleShow() {
-		TiDict d = proxy.getDynamicProperties();
+		KrollDict d = proxy.getProperties();
 
 		String message = "";
 		if (d.containsKey("message")) {
@@ -204,7 +204,7 @@ public class TiUIActivityIndicator extends TiUIView
 		visible = true;
 	}
 
-	public void hide(TiDict options)
+	public void hide(KrollDict options)
 	{
 		if (!visible) {
 			return;

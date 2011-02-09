@@ -6,18 +6,28 @@
  */
 package ti.modules.titanium.ui.widget.webview;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+
+import org.appcelerator.kroll.KrollDict;
+import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.titanium.TiBlob;
-import org.appcelerator.titanium.TiDict;
-import org.appcelerator.titanium.TiProxy;
+import org.appcelerator.titanium.TiC;
+import org.appcelerator.titanium.io.TiBaseFile;
+import org.appcelerator.titanium.io.TiFileFactory;
 import org.appcelerator.titanium.proxy.TiViewProxy;
 import org.appcelerator.titanium.util.Log;
+import org.appcelerator.titanium.util.TiConfig;
 import org.appcelerator.titanium.util.TiConvert;
 import org.appcelerator.titanium.util.TiMimeTypeHelper;
+import org.appcelerator.titanium.view.TiBackgroundDrawable;
 import org.appcelerator.titanium.view.TiCompositeLayout;
 import org.appcelerator.titanium.view.TiUIView;
 
-import ti.modules.titanium.ui.WebViewProxy;
 import android.content.Context;
+import android.graphics.Color;
 import android.net.Uri;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -25,7 +35,7 @@ import android.webkit.WebView;
 public class TiUIWebView extends TiUIView {
 
 	private static final String LCAT = "TiUIWebView";
-	private TiWebViewBinding binding;
+	private static final boolean DBG = TiConfig.LOGD;
 	private TiWebViewClient client;
 	private boolean changingUrl = false;
 
@@ -64,7 +74,6 @@ public class TiUIWebView extends TiUIView {
 		webView.setWebViewClient(client);
 		webView.client = client;
 
-		//binding = new TiWebViewBinding(proxy.getTiContext(), webView);
 		TiCompositeLayout.LayoutParams params = getLayoutParams();
 		params.autoFillsHeight = true;
 		params.autoFillsWidth = true;
@@ -78,51 +87,131 @@ public class TiUIWebView extends TiUIView {
 	}
 
 	@Override
-	public void processProperties(TiDict d) {
+	public void processProperties(KrollDict d) {
 		super.processProperties(d);
 
-		if (d.containsKey("url")) {
-			setUrl(TiConvert.toString(d, "url"));
-		} else if (d.containsKey("html")) {
-			setHtml(TiConvert.toString(d, "html"));
-		} else if (d.containsKey("data")) {
-			Object value = d.get("data");
+		if (d.containsKey(TiC.PROPERTY_URL)) {
+			setUrl(TiConvert.toString(d, TiC.PROPERTY_URL));
+		} else if (d.containsKey(TiC.PROPERTY_HTML)) {
+			setHtml(TiConvert.toString(d, TiC.PROPERTY_HTML));
+		} else if (d.containsKey(TiC.PROPERTY_DATA)) {
+			Object value = d.get(TiC.PROPERTY_DATA);
 			if (value instanceof TiBlob) {
 				setData((TiBlob)value);
 			}
 		}
+
+		// If TiUIView's processProperties ended up making a TiBackgroundDrawable
+		// for the background, we must set the WebView background color to transparent
+		// in order to see any of it.
+		if (nativeView != null && nativeView.getBackground() instanceof TiBackgroundDrawable) {
+			nativeView.setBackgroundColor(Color.TRANSPARENT);
+		}
 	}
 
 	@Override
-	public void propertyChanged(String key, Object oldValue, Object newValue, TiProxy proxy) {
-		if ("url".equals(key) && !changingUrl) {
+	public void propertyChanged(String key, Object oldValue, Object newValue, KrollProxy proxy) {
+		if (TiC.PROPERTY_URL.equals(key) && !changingUrl) {
 			setUrl(TiConvert.toString(newValue));
-		} else if ("html".equals(key)) {
+		} else if (TiC.PROPERTY_HTML.equals(key)) {
 			setHtml(TiConvert.toString(newValue));
-		} else if ("data".equals(key)) {
+		} else if (TiC.PROPERTY_DATA.equals(key)) {
 			if (newValue instanceof TiBlob) {
 				setData((TiBlob)newValue);
 			}
 		} else {
 			super.propertyChanged(key, oldValue, newValue, proxy);
 		}
+		// If TiUIView's propertyChanged ended up making a TiBackgroundDrawable
+		// for the background, we must set the WebView background color to transparent
+		// in order to see any of it.
+		boolean isBgRelated = (key.startsWith(TiC.PROPERTY_BACKGROUND_PREFIX) || key.startsWith(TiC.PROPERTY_BORDER_PREFIX));
+		if (isBgRelated && nativeView != null && nativeView.getBackground() instanceof TiBackgroundDrawable) {
+			nativeView.setBackgroundColor(Color.TRANSPARENT);
+		}
+	}
+
+	private boolean mightBeHtml(String url)
+	{
+		String mime = TiMimeTypeHelper.getMimeType(url);
+		if (mime.equals("text/html")){
+			return true;
+		} else if (mime.equals("application/xhtml+xml")) {
+			return true;
+		} else {
+			return false;
+		}
 	}
 
 	public void setUrl(String url)
 	{
-		Uri uri = Uri.parse(url);
-		if (uri.getScheme() != null) {
-			//TODO bind our variables
-			getWebView().loadUrl(url);
-		} else {
-			String resolvedUrl = getProxy().getTiContext().resolveUrl(null, url);
-			getWebView().loadUrl(resolvedUrl);
+		String finalUrl = url;
+		Uri uri = Uri.parse(finalUrl);
+		boolean originalUrlHasScheme = (uri.getScheme() != null);
+
+		if (!originalUrlHasScheme) {
+			finalUrl = getProxy().getTiContext().resolveUrl(null, finalUrl);
 		}
+
+		if (TiFileFactory.isLocalScheme(finalUrl) && mightBeHtml(finalUrl) ) {
+			TiBaseFile tiFile = TiFileFactory.createTitaniumFile(getProxy().getTiContext(), finalUrl, false);
+			if (tiFile != null) {
+				StringBuilder out = new StringBuilder();
+				InputStream fis = null;
+				try {
+					fis = tiFile.getInputStream();
+					InputStreamReader reader = new InputStreamReader(fis, "utf-8");
+					BufferedReader breader = new BufferedReader(reader);
+					boolean injected = false;
+					String line = breader.readLine();
+					while (line != null) {
+						if (!injected) {
+							int pos = line.indexOf("<html");
+							if (pos >= 0) {
+								int posEnd = line.indexOf(">", pos);
+								if (posEnd > pos) {
+									out.append(line.substring(pos, posEnd+ 1));
+									out.append(TiWebViewBinding.INJECTION_CODE);
+									if ((posEnd + 1) < line.length() ) {
+										out.append(line.substring(posEnd + 1));
+									}
+									out.append("\n");
+									injected = true;
+									line = breader.readLine();
+									continue;
+								}
+							}
+						}
+						out.append(line);
+						out.append("\n");
+						line = breader.readLine();
+					}
+					setHtml(out.toString(), (originalUrlHasScheme ? url : finalUrl) ); // keep app:// etc. intact in case html in file contains links to JS that use app:// etc.
+					return;
+				} catch (IOException ioe) {
+					Log.e(LCAT, "Problem reading from " + url + ": " + ioe.getMessage() + ". Will let WebView try loading it directly.", ioe);
+				} finally {
+					if (fis != null) {
+						try {
+							fis.close();
+						} catch (IOException e) {
+							Log.w(LCAT, "Problem closing stream: " + e.getMessage(), e);
+						}
+					}
+				}
+			}
+		}
+
+		if (DBG) {
+			Log.d(LCAT, "WebView will load " + url + " directly without code injection.");
+		}
+		getWebView().loadUrl(finalUrl);
+
 	}
 
 	public void changeProxyUrl(String url) {
 		changingUrl = true;
-		getProxy().setDynamicValue("url", url);
+		getProxy().setProperty("url", url, true);
 		changingUrl = false;
 	}
 
@@ -172,8 +261,31 @@ public class TiUIWebView extends TiUIView {
 		// 			//alert('AFTER: ' + imgs[i].src);
 		// 		}
 
+		setHtml(html, "file:///android_asset/Resources/");
+	}
 
-		getWebView().loadDataWithBaseURL("file:///android_asset/Resources/", html, "text/html", "utf-8", null);
+	private void setHtml(String html, String baseUrl)
+	{
+		if (html.contains(TiWebViewBinding.SCRIPT_INJECTION_ID)) {
+			// Our injection code is in there already, go ahead and show.
+			getWebView().loadDataWithBaseURL(baseUrl, html, "text/html", "utf-8", null);
+			return;
+		}
+
+		int tagStart = html.indexOf("<html");
+		int tagEnd = -1;
+		if (tagStart >= 0) {
+			tagEnd = html.indexOf(">", tagStart + 1);
+			if (tagEnd > tagStart) {
+				StringBuilder sb = new StringBuilder(html.length() + 2500);
+				sb.append(html.substring(0, tagEnd + 1));
+				sb.append(TiWebViewBinding.INJECTION_CODE);
+				sb.append(html.substring(tagEnd + 1));
+				getWebView().loadDataWithBaseURL(baseUrl, sb.toString(), "text/html", "utf-8", null);
+				return;
+			}
+		}
+		getWebView().loadDataWithBaseURL(baseUrl, html, "text/html", "utf-8", null);
 	}
 
 	public void setData(TiBlob blob)
@@ -196,11 +308,6 @@ public class TiUIWebView extends TiUIView {
 
 	public void setBasicAuthentication(String username, String password) {
 		client.setBasicAuthentication(username, password);
-	}
-
-	@Override
-	protected boolean allowRegisterForTouch() {
-		return false;
 	}
 
 	public boolean canGoBack() {

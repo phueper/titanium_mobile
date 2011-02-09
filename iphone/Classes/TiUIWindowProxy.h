@@ -19,13 +19,14 @@
 	KrollBridge *context;
 	BOOL hasToolbar;
 	BOOL contextReady;
+	BOOL animating;
 	UIImageView *barImageView;
 	NSURL *oldBaseURL;
 	id latch;
 }
 
 -(void)_refreshBackButton;
--(void)boot:(BOOL)timeout;
+-(void)boot:(BOOL)timeout args:(id)args;
 
 @end
 

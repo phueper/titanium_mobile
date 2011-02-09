@@ -6,18 +6,23 @@
  */
 package ti.modules.titanium.ui;
 
+import org.appcelerator.kroll.annotations.Kroll;
 import org.appcelerator.titanium.TiContext;
 import org.appcelerator.titanium.proxy.TiViewProxy;
 import org.appcelerator.titanium.view.TiUIView;
 
+import ti.modules.titanium.ui.android.AndroidModule;
 import ti.modules.titanium.ui.widget.TiUISwitch;
 import android.app.Activity;
 
+@Kroll.proxy(creatableInModule=UIModule.class)
 public class SwitchProxy extends TiViewProxy
 {
-	public SwitchProxy(TiContext tiContext, Object[] args)
+	public SwitchProxy(TiContext tiContext)
 	{
-		super(tiContext, args);
+		super(tiContext);
+		setProperty("value", false);
+		setProperty("style", AndroidModule.SWITCH_STYLE_TOGGLEBUTTON);
 	}
 
 	@Override

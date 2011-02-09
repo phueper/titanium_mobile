@@ -6,8 +6,8 @@
  */
 package ti.modules.titanium.ui.widget;
 
-import org.appcelerator.titanium.TiDict;
-import org.appcelerator.titanium.TiProxy;
+import org.appcelerator.kroll.KrollDict;
+import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.titanium.proxy.TiViewProxy;
 import org.appcelerator.titanium.util.Log;
 import org.appcelerator.titanium.util.TiConfig;
@@ -19,6 +19,7 @@ import android.graphics.Rect;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
+import android.text.TextUtils.TruncateAt;
 import android.text.method.DialerKeyListener;
 import android.text.method.DigitsKeyListener;
 import android.text.method.NumberKeyListener;
@@ -60,6 +61,7 @@ public class TiUIText extends TiUIView
 	private static final int KEYBOARD_EMAIL_ADDRESS = 5;
 	private static final int KEYBOARD_NAMEPHONE_PAD = 6;
 	private static final int KEYBOARD_DEFAULT = 7;
+	private static final int KEYBOARD_DECIMAL_PAD = 8;
 	
 	// UIModule also has these as values - there's a chance they won't stay in sync if somebody changes one without changing these
 	private static final int TEXT_AUTOCAPITALIZATION_NONE = 0;
@@ -98,7 +100,7 @@ public class TiUIText extends TiUIView
 
 
 	@Override
-	public void processProperties(TiDict d)
+	public void processProperties(KrollDict d)
 	{
 		super.processProperties(d);
 
@@ -114,8 +116,15 @@ public class TiUIText extends TiUIView
 		if (d.containsKey("hintText")) {
 			tv.setHint(d.getString("hintText"));
 		}
+		if (d.containsKey("ellipsize")) {
+			if (TiConvert.toBoolean(d, "ellipsize")) {
+				tv.setEllipsize(TruncateAt.END);
+			} else {
+				tv.setEllipsize(null);
+			}
+		}
 		if (d.containsKey("font")) {
-			TiUIHelper.styleText(tv, d.getTiDict("font"));
+			TiUIHelper.styleText(tv, d.getKrollDict("font"));
 		}
 		if (d.containsKey("textAlign") || d.containsKey("verticalAlign")) {
 			String textAlign = null;
@@ -134,13 +143,12 @@ public class TiUIText extends TiUIView
 		if (d.containsKey("keyboardType") || d.containsKey("autocorrect") || d.containsKey("passwordMask") || d.containsKey("autocapitalization"))
 		{
 			handleKeyboard(d);
-			
 		}
 	}
 
 
 	@Override
-	public void propertyChanged(String key, Object oldValue, Object newValue, TiProxy proxy)
+	public void propertyChanged(String key, Object oldValue, Object newValue, KrollProxy proxy)
 	{
 		if (DBG) {
 			Log.d(LCAT, "Property: " + key + " old: " + oldValue + " new: " + newValue);
@@ -153,27 +161,33 @@ public class TiUIText extends TiUIView
 			tv.setTextColor(TiConvert.toColor((String) newValue));
 		} else if (key.equals("hintText")) {
 			tv.setHint((String) newValue);
+		} else if (key.equals("ellipsize")) {
+			if (TiConvert.toBoolean(newValue)) {
+				tv.setEllipsize(TruncateAt.END);
+			} else {
+				tv.setEllipsize(null);
+			}
 		} else if (key.equals("textAlign") || key.equals("verticalAlign")) {
 			String textAlign = null;
 			String verticalAlign = null;
 			if (key.equals("textAlign")) {
 				textAlign = TiConvert.toString(newValue);
-			} else if (proxy.hasDynamicValue("textAlign")){
-				textAlign = TiConvert.toString(proxy.getDynamicValue("textAlign"));
+			} else if (proxy.hasProperty("textAlign")){
+				textAlign = TiConvert.toString(proxy.getProperty("textAlign"));
 			}
 			if (key.equals("verticalAlign")) {
 				verticalAlign = TiConvert.toString(newValue);
-			} else if (proxy.hasDynamicValue("verticalAlign")){
-				verticalAlign = TiConvert.toString(proxy.getDynamicValue("verticalAlign"));
+			} else if (proxy.hasProperty("verticalAlign")){
+				verticalAlign = TiConvert.toString(proxy.getProperty("verticalAlign"));
 			}
 			handleTextAlign(textAlign, verticalAlign);
 		} else if (key.equals("keyboardType") || (key.equals("autocorrect") || key.equals("autocapitalization") || key.equals("passwordMask"))) {
-			TiDict d = proxy.getDynamicProperties();
+			KrollDict d = proxy.getProperties();
 			handleKeyboard(d);
 		} else if (key.equals("returnKeyType")) {
 			handleReturnKeyType(TiConvert.toInt(newValue));
 		} else if (key.equals("font")) {
-			TiUIHelper.styleText(tv, (TiDict) newValue);
+			TiUIHelper.styleText(tv, (KrollDict) newValue);
 		} else {
 			super.propertyChanged(key, oldValue, newValue, proxy);
 		}
@@ -192,17 +206,17 @@ public class TiUIText extends TiUIView
 	public void onTextChanged(CharSequence s, int start, int before, int count)
 	{
 		String value = tv.getText().toString();
-		TiDict data = new TiDict();
+		KrollDict data = new KrollDict();
 		data.put("value", value);
 
-		proxy.internalSetDynamicValue("value", value, false);
+		proxy.setProperty("value", value);
 		proxy.fireEvent("change", data);
 	}
 
 
 	public void onFocusChange(View v, boolean hasFocus) {
 		if (hasFocus) {
-			Boolean clearOnEdit = (Boolean) proxy.getDynamicValue("clearOnEdit");
+			Boolean clearOnEdit = (Boolean) proxy.getProperty("clearOnEdit");
 			if (clearOnEdit != null && clearOnEdit) {
 				((EditText) nativeView).setText("");
 			}
@@ -215,9 +229,9 @@ public class TiUIText extends TiUIView
 	}
 
 	@Override
-	protected TiDict getFocusEventObject(boolean hasFocus)
+	protected KrollDict getFocusEventObject(boolean hasFocus)
 	{
-		TiDict event = new TiDict();
+		KrollDict event = new KrollDict();
 		event.put("value", tv.getText().toString());
 		return event;
 	}
@@ -225,10 +239,10 @@ public class TiUIText extends TiUIView
 	public boolean onEditorAction(TextView v, int actionId, KeyEvent keyEvent)
 	{
 		String value = tv.getText().toString();
-		TiDict data = new TiDict();
+		KrollDict data = new KrollDict();
 		data.put("value", value);
 
-		proxy.internalSetDynamicValue("value", value, false);
+		proxy.setProperty("value", value);
 		if (DBG) {
 			Log.e(LCAT, "ActionID: " + actionId + " KeyEvent: " + (keyEvent != null ? keyEvent.getKeyCode() : null));
 		}
@@ -236,7 +250,7 @@ public class TiUIText extends TiUIView
 			proxy.fireEvent("return", data);
 		}
 
-		Boolean enableReturnKey = (Boolean) proxy.getDynamicValue("enableReturnKey");
+		Boolean enableReturnKey = (Boolean) proxy.getProperty("enableReturnKey");
 		if (enableReturnKey != null && enableReturnKey && v.getText().length() == 0) {
 			return true;
 		}
@@ -254,10 +268,10 @@ public class TiUIText extends TiUIView
 		TiUIHelper.setAlignment(tv, textAlign, verticalAlign);
 	}
 
-	public void handleKeyboard(TiDict d) 
+	public void handleKeyboard(KrollDict d) 
 	{
 		int type = KEYBOARD_ASCII;
-		int passwordMask = 0;
+		boolean passwordMask = false;
 		int autocorrect = InputType.TYPE_TEXT_FLAG_AUTO_CORRECT | InputType.TYPE_TEXT_FLAG_AUTO_CORRECT;
 		int autoCapValue = 0;
 		
@@ -296,16 +310,14 @@ public class TiUIText extends TiUIView
 		}
 				
 		if (d.containsKey("passwordMask")) {
-			if(TiConvert.toBoolean(d,"passwordMask")) {
-				passwordMask = InputType.TYPE_TEXT_VARIATION_PASSWORD;
-			}
+			passwordMask = TiConvert.toBoolean(d, "passwordMask");
 		}		
 
 		if (d.containsKey("keyboardType")) {
 			type = TiConvert.toInt(d, "keyboardType");
 		}
 		
-		int typeModifiers = autocorrect | passwordMask | autoCapValue;
+		int typeModifiers = autocorrect | autoCapValue;
 		
 		switch(type) {
 			case KEYBOARD_ASCII :
@@ -333,9 +345,6 @@ public class TiUIText extends TiUIView
 					}
 				});
 				//tv.setKeyListener(DigitsKeyListener.getInstance());
-				if (passwordMask != 0) {
-					tv.setTransformationMethod(PasswordTransformationMethod.getInstance());
-				}
 				break;
 			case KEYBOARD_URL :
 				Log.i(LCAT, "Setting keyboard type URL-3");
@@ -343,19 +352,14 @@ public class TiUIText extends TiUIView
 				tv.setImeOptions(EditorInfo.IME_ACTION_GO);
 				tv.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI | typeModifiers);
 				break;
+			case KEYBOARD_DECIMAL_PAD :
 			case KEYBOARD_NUMBER_PAD :
 				tv.setKeyListener(DigitsKeyListener.getInstance(true,true));
 				tv.setInputType(InputType.TYPE_CLASS_NUMBER | typeModifiers);
-				if (passwordMask != 0) {
-					tv.setTransformationMethod(PasswordTransformationMethod.getInstance());
-				}
 				break;
 			case KEYBOARD_PHONE_PAD :
 				tv.setKeyListener(DialerKeyListener.getInstance());
 				tv.setInputType(InputType.TYPE_CLASS_PHONE | typeModifiers);
-				if (passwordMask != 0) {
-					tv.setTransformationMethod(PasswordTransformationMethod.getInstance());
-				}
 				break;
 			case KEYBOARD_EMAIL_ADDRESS :
 				tv.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS | typeModifiers);
@@ -365,7 +369,9 @@ public class TiUIText extends TiUIView
 				tv.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_NORMAL | typeModifiers);
 				break;
 		}
-
+		if (passwordMask) {
+			tv.setTransformationMethod(PasswordTransformationMethod.getInstance());
+		}
 		if (!field) {
 			tv.setSingleLine(false);
 		}

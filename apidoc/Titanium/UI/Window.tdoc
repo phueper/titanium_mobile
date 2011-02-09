@@ -45,6 +45,10 @@ backButtonTitleImage[string]: url to an image to show as the back button.  only 
 backButtonTitle[string]: title for the back button. only available in iPhone. this is only valid when the window is a child of a tab.
 navBarHidden[boolean]: for modal windows, hide the nav bar (true) or show the nav bar (false, default).
 
+# 1.5
+titleid[string]: the key in the locale file to use for the title property
+titlepromptid[string]: the key in the locale file to use for the titlePrompt property
+softInputMode[int]: One of Ti.UI.Android.SOFT_INPUT_ADJUST_PAN, Ti.UI.Android.SOFT_INPUT_ADJUST_RESIZE, or Ti.UI.Android.SOFT_INPUT_ADJUST_UNSPECIFIED. Note: MUST be passed in the creation options. (Android Only) [Android Doc: Window.setSoftInputMode](http://developer.android.com/reference/android/view/Window.html#setSoftInputMode(int))
 
 - methods
 
@@ -157,7 +161,7 @@ window.fireEvent('foo',{a:'b'});
 
 It's worth noting two important limitations of the example above:
 
-* You must open the event before you can send events to it. You also may have to fire the event after a specified amount of time if you intend to immediately send data to the window.  This is because windows are opened asynchronously and on a separate thread than the caller thread.
+* You must open the window before you can send events to it. You also may have to fire the event after a specified amount of time if you intend to immediately send data to the window.  This is because windows are opened asynchronously and on a separate thread than the caller thread.
 * You can only send JSON-serializable data in a fireEvent.  If you attempt to send objects that have function references, they will be null.
 
 

@@ -42,13 +42,20 @@ class IPhone(object):
 		
 		plist = open(os.path.join(template_dir,'Info.plist'),'r').read()
 
+		# Sometimes we actually need app properties!
+		tiapp = TiAppXML(os.path.join(project_dir,'tiapp.xml'))
+
 		if not release:
 			plist = plist.replace('__PROJECT_NAME__',self.name)
 			plist = plist.replace('__PROJECT_ID__',self.id)
 			plist = plist.replace('__URL__',self.id)
 			urlscheme = self.name.replace('.','_').replace(' ','').lower()
 			plist = plist.replace('__URLSCHEME__',urlscheme)
-
+			if ti.has_app_property('ti.facebook.appid'):
+				fbid = ti.get_app_property('ti.facebook.appid')
+				plist = plist.replace('__ADDITIONAL_URL_SCHEMES__', '<string>fb%s</string>' % fbid)
+			else:
+				plist = plist.replace('__ADDITIONAL_URL_SCHEMES__','')
 			out_plist = open(os.path.join(iphone_dir,'Info.plist'),'w')
 			out_plist.write(plist)
 			out_plist.close()
@@ -70,11 +77,8 @@ class IPhone(object):
 		# write .gitignore
 		gitignore = open(os.path.join(iphone_dir,'.gitignore'),'w')
 		# exclude generated files
-		gitignore.write("Classes\n")
-		gitignore.write("tmp\n")
-		gitignore.write("build\n")
-		gitignore.write("headers\n")
-		gitignore.write("lib\n")
+		for i in ["Classes","tmp","build","headers","lib","Resources","*.xcodeproj","*.xcconfig","main.m","*.plist","*.pch"]:
+			gitignore.write("%s\n" % i)
 		gitignore.close()
 
 		gitignore = open(os.path.join(iphone_dir,'%s.xcodeproj'%self.name,'.gitignore'),'w')

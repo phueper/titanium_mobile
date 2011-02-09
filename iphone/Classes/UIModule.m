@@ -29,9 +29,13 @@
 #ifdef USE_TI_UIIOS
 #import "TiUIiOSProxy.h"
 #endif
+#ifdef USE_TI_UICLIPBOARD
+#import "TiUIClipboardProxy.h"
+#endif
 #import "TiApp.h"
 #import "ImageLoader.h"
 #import "Webcolor.h"
+#import "TiUtils.h"
 
 @implementation UIModule
 
@@ -78,6 +82,18 @@ MAKE_SYSTEM_PROP(KEYBOARD_ASCII,UIKeyboardTypeASCIICapable);
 MAKE_SYSTEM_PROP(KEYBOARD_NUMBERS_PUNCTUATION,UIKeyboardTypeNumbersAndPunctuation);
 MAKE_SYSTEM_PROP(KEYBOARD_URL,UIKeyboardTypeURL);
 MAKE_SYSTEM_PROP(KEYBOARD_NUMBER_PAD,UIKeyboardTypeNumberPad);
+
+/* Because this is a new feature in 4.1, we have to guard against it in both compiling AND runtime.*/
+-(NSNumber*)KEYBOARD_DECIMAL_PAD
+{
+#if __IPHONE_4_1 <= __IPHONE_OS_VERSION_MAX_ALLOWED
+	if([[[UIDevice currentDevice] systemVersion] floatValue] >= 4.1){
+		return [NSNumber numberWithInt:UIKeyboardTypeDecimalPad];
+	}
+#endif
+	return [NSNumber numberWithInt:UIKeyboardTypeNumbersAndPunctuation];
+}
+
 MAKE_SYSTEM_PROP(KEYBOARD_PHONE_PAD,UIKeyboardTypePhonePad);
 MAKE_SYSTEM_PROP(KEYBOARD_NAMEPHONE_PAD,UIKeyboardTypeNamePhonePad);
 MAKE_SYSTEM_PROP(KEYBOARD_EMAIL,UIKeyboardTypeEmailAddress);
@@ -135,11 +151,29 @@ MAKE_SYSTEM_PROP(BLEND_MODE_XOR,kCGBlendModeXOR);
 MAKE_SYSTEM_PROP(BLEND_MODE_PLUS_DARKER,kCGBlendModePlusDarker);
 MAKE_SYSTEM_PROP(BLEND_MODE_PLUS_LIGHTER,kCGBlendModePlusLighter);
 
+// TODO: Move these to a Ti.UI.iOS module
 MAKE_SYSTEM_PROP(AUTODETECT_NONE,UIDataDetectorTypeNone);
 MAKE_SYSTEM_PROP(AUTODETECT_ALL,UIDataDetectorTypeAll);
 MAKE_SYSTEM_PROP(AUTODETECT_PHONE,UIDataDetectorTypePhoneNumber);
 MAKE_SYSTEM_PROP(AUTODETECT_LINK,UIDataDetectorTypeLink);
 
+// TODO: Move to TiBase.h?
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_4_0
+#define MAKE_SYSTEM_PROP_IOS4(name,map1,map2) \
+-(NSNumber*)name \
+{\
+return [NSNumber numberWithInt:([TiUtils isIOS4OrGreater] ? map1 : map2)];\
+}
+#else
+#define MAKE_SYSTEM_PROP_IOS4(name,map1,map2) \
+-(NSNumber*)name \
+{\
+return [NSNumber numberWithInt:map2];\
+}
+#endif
+
+MAKE_SYSTEM_PROP_IOS4(AUTODETECT_ADDRESS,UIDataDetectorTypeAddress,UIDataDetectorTypeAll);
+MAKE_SYSTEM_PROP_IOS4(AUTODETECT_CALENDAR,UIDataDetectorTypeCalendarEvent,UIDataDetectorTypeAll);
 
 
 -(void)setBackgroundColor:(id)color
@@ -282,6 +316,17 @@ MAKE_SYSTEM_PROP(FACE_DOWN,UIDeviceOrientationFaceDown);
 }
 #endif
 
+#ifdef USE_TI_UICLIPBOARD
+-(id)Clipboard
+{
+	if (clipboard==nil)
+	{
+		clipboard = [[TiUIClipboardProxy alloc] _initWithPageContext:[self pageContext]];
+	}
+	return clipboard;
+}
+#endif
+
 #pragma mark Internal Memory Management
 
 -(void)didReceiveMemoryWarning:(NSNotification*)notification
@@ -294,6 +339,9 @@ MAKE_SYSTEM_PROP(FACE_DOWN,UIDeviceOrientationFaceDown);
 #endif
 #ifdef USE_TI_UIIOS
 	RELEASE_TO_NIL(ios);
+#endif
+#ifdef USE_TI_UICLIPBOARD
+	RELEASE_TO_NIL(clipboard);
 #endif
 	[super didReceiveMemoryWarning:notification];
 }

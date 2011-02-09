@@ -11,6 +11,7 @@ import java.util.GregorianCalendar;
 import org.appcelerator.titanium.TiApplication;
 import org.appcelerator.titanium.util.Log;
 import org.appcelerator.titanium.util.TiPlatformHelper;
+import org.appcelerator.titanium.util.TiDatabaseHelper;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -57,8 +58,8 @@ public class TiAnalyticsEventFactory
 	public static TiAnalyticsEvent createAppEnrollEvent(TiApplication tiApp, String deployType)
 	{
 		TiAnalyticsEvent event = null;
-
 		JSONObject json;
+		TiDatabaseHelper db = new TiDatabaseHelper(tiApp);
 
 		try {
 			json = new JSONObject();
@@ -70,6 +71,7 @@ public class TiAnalyticsEventFactory
 			json.put("ostype", TiPlatformHelper.getOstype());
 			json.put("osarch", TiPlatformHelper.getArchitecture());
 			json.put("model", TiPlatformHelper.getModel());
+			json.put("previous_mid", db.getPlatformParam("previous_machine_id", "notfound"));
 			json.put("deploytype", deployType);
 
 			event = new TiAnalyticsEvent(EVENT_APP_ENROLL, EVENT_APP_ENROLL, json);
@@ -163,7 +165,7 @@ public class TiAnalyticsEventFactory
 //
 //	- details		-- event details (string)
 
-	public static TiAnalyticsEvent createErrorEvent(Thread t, Throwable err)
+	public static TiAnalyticsEvent createErrorEvent(Thread t, Throwable err, String tiVersionInfo)
 	{
 		TiAnalyticsEvent event = null;
 
@@ -172,6 +174,7 @@ public class TiAnalyticsEventFactory
 			.append("thread_name").append(t.getName()).append("\n")
 			.append("thread_id").append(t.getId()).append("\n")
 			.append("error_msg").append(err.toString()).append("\n")
+			.append("ti_version").append(tiVersionInfo).append("\n")
 			.append("<<<<<<<<<<<<<<< STACK TRACE >>>>>>>>>>>>>>>").append("\n")
 			;
 

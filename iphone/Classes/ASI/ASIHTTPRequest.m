@@ -554,6 +554,7 @@ static BOOL isiPhoneOS2;
 #if DEBUG_REQUEST_STATUS || DEBUG_THROTTLING
 	NSLog(@"Starting asynchronous request %@",self);
 #endif
+	[cancelledLock retain];
 	NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
 
 	[self setInProgress:YES];	
@@ -575,6 +576,7 @@ static BOOL isiPhoneOS2;
 		[self failWithError:[NSError errorWithDomain:NetworkRequestErrorDomain code:ASIUnhandledExceptionError userInfo:[NSDictionary dictionaryWithObjectsAndKeys:[exception name],NSLocalizedDescriptionKey,[exception reason],NSLocalizedFailureReasonErrorKey,underlyingError,NSUnderlyingErrorKey,nil]]];
 	}	
 	[pool release];
+	[cancelledLock release];
 }
 
 #pragma mark concurrency
@@ -1218,6 +1220,10 @@ static BOOL isiPhoneOS2;
 	
 	[[self postBodyReadStream] close];
 	
+	// This block is commented out because sometimes we ARE interested in what's been retrieved already
+	// when a request is cancelled - but it might be appropriate in some situations, and not others.
+	
+	/*
     if ([self rawResponseData]) {
 		[self setRawResponseData:nil];
 	
@@ -1230,14 +1236,14 @@ static BOOL isiPhoneOS2;
 			[self removeTemporaryDownloadFile];
 		}
 	}
+	[self setResponseHeaders:nil];
+	 */
 	
 	// Clean up any temporary file used to store request body for streaming
 	if (![self authenticationNeeded] && [self didCreateTemporaryPostDataFile]) {
 		[self removePostDataFile];
 		[self setDidCreateTemporaryPostDataFile:NO];
 	}
-	
-	[self setResponseHeaders:nil];
 }
 
 
@@ -1803,7 +1809,10 @@ static BOOL isiPhoneOS2;
 			// See also:
 			// http://allseeing-i.lighthouseapp.com/projects/27881/tickets/27-302-redirection-issue
 							
-			if ([self responseStatusCode] != 307 && (![self shouldUseRFC2616RedirectBehaviour] || [self responseStatusCode] == 303)) {
+			BOOL isRedirectCode = ([self responseStatusCode] == 301) || 
+									([self responseStatusCode] == 302) || 
+									([self responseStatusCode] == 303);
+			if ([self responseStatusCode] != 307 && (![self shouldUseRFC2616RedirectBehaviour] || isRedirectCode)) {
 				[self setRequestMethod:@"GET"];
 				[self setPostBody:nil];
 				[self setPostLength:0];

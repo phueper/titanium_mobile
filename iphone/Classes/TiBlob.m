@@ -25,7 +25,11 @@
 
 -(id)description
 {
-	return @"[object TiBlob]";
+	NSString* text = [self text];
+	if (text == nil || [text isEqualToString:@""]) {
+		return @"[object TiBlob]";
+	}
+	return text;
 }
 
 -(BOOL)isImageMimeType
@@ -203,6 +207,12 @@
 	return path;
 }
 
+// For Android compatibility
+-(NSString*)nativePath
+{
+	return path;
+}
+
 -(void)setMimeType:(NSString*)mime type:(TiBlobType)type_
 {
 	RELEASE_TO_NIL(mimetype);
@@ -300,7 +310,24 @@
 		ENSURE_ARG_COUNT(args,2);
 		NSUInteger width = [TiUtils intValue:[args objectAtIndex:0]];
 		NSUInteger height = [TiUtils intValue:[args objectAtIndex:1]];
-		return [[[TiBlob alloc] initWithImage:[UIImageResize resizedImage:CGSizeMake(width, height) interpolationQuality:kCGInterpolationHigh image:image]] autorelease];
+		return [[[TiBlob alloc] initWithImage:[UIImageResize resizedImage:CGSizeMake(width, height) interpolationQuality:kCGInterpolationHigh image:image hires:NO]] autorelease];
+	}
+	return nil;
+}
+
+- (id)imageAsCropped:(id)args
+{
+	[self ensureImageLoaded];
+	if (image!=nil)
+	{
+		ENSURE_SINGLE_ARG(args,NSDictionary);
+		CGRect bounds;
+		CGSize imageSize = [image size];
+		bounds.size.width = [TiUtils floatValue:@"width" properties:args def:imageSize.width];
+		bounds.size.height = [TiUtils floatValue:@"height" properties:args def:imageSize.height];
+		bounds.origin.x = [TiUtils floatValue:@"x" properties:args def:(imageSize.width - bounds.size.width) / 2.0];
+		bounds.origin.y = [TiUtils floatValue:@"y" properties:args def:(imageSize.height - bounds.size.height) / 2.0];
+		return [[[TiBlob alloc] initWithImage:[UIImageResize croppedImage:bounds image:image]] autorelease];
 	}
 	return nil;
 }

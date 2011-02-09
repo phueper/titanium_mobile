@@ -8,8 +8,8 @@ package ti.modules.titanium.ui.widget;
 
 import java.util.ArrayList;
 
-import org.appcelerator.titanium.TiDict;
-import org.appcelerator.titanium.TiProxy;
+import org.appcelerator.kroll.KrollDict;
+import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.titanium.proxy.TiViewProxy;
 import org.appcelerator.titanium.util.TiConvert;
 import org.appcelerator.titanium.view.TiCompositeLayout;
@@ -36,13 +36,16 @@ public class TiUIScrollableView extends TiUIView
 	}
 
 	@Override
-	public void processProperties(TiDict d) {
+	public void processProperties(KrollDict d) {
 		if (d.containsKey("views")) {
 			getView().setViews(d.get("views"));
-			proxy.getDynamicProperties().remove("views"); // Don't store
 		} 
-		if (d.containsKey("showPagingControls")) {
-			getView().setShowPagingControl(TiConvert.toBoolean(d, "showPagingControls"));
+		if (d.containsKey("showPagingControl")) {
+			boolean showPager = TiConvert.toBoolean(d, "showPagingControl");
+			getView().setShowPagingControl(showPager);
+			if (showPager) {
+				showPager();
+			}
 		} 
 		if (d.containsKey("currentPage")) {
 			setCurrentPage(TiConvert.toInt(d, "currentPage"));
@@ -52,7 +55,7 @@ public class TiUIScrollableView extends TiUIView
 
 	
 	@Override
-	public void propertyChanged(String key, Object oldValue, Object newValue, TiProxy proxy) {
+	public void propertyChanged(String key, Object oldValue, Object newValue, KrollProxy proxy) {
 		if("currentPage".equals(key)) {
 			setCurrentPage(TiConvert.toInt(newValue));
 		} else {
@@ -66,8 +69,8 @@ public class TiUIScrollableView extends TiUIView
 
 	public void setViews(Object viewsObject) {
 		getView().setViews(viewsObject);
-		if (proxy.hasDynamicValue("currentPage")) {
-			setCurrentPage(TiConvert.toInt(proxy.getDynamicValue("currentPage")));
+		if (proxy.hasProperty("currentPage")) {
+			setCurrentPage(TiConvert.toInt(proxy.getProperty("currentPage")));
 		}
 	}
 
@@ -81,9 +84,13 @@ public class TiUIScrollableView extends TiUIView
 
 	public void showPager()
 	{
-		boolean showPagingControl = TiConvert.toBoolean(proxy.getDynamicValue("showPagingControl"));
-		if (showPagingControl) {
-			getView().showPager();
+		Object showPagingControlProperty = proxy.getProperty("showPagingControl");
+
+		if (showPagingControlProperty != null) {
+			boolean showPagingControl = TiConvert.toBoolean(showPagingControlProperty);
+			if (showPagingControl) {
+				getView().showPager();
+			}
 		}
 	}
 

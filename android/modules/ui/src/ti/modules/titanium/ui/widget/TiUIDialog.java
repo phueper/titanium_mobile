@@ -6,8 +6,9 @@
  */
 package ti.modules.titanium.ui.widget;
 
-import org.appcelerator.titanium.TiDict;
-import org.appcelerator.titanium.TiProxy;
+import org.appcelerator.kroll.KrollDict;
+import org.appcelerator.kroll.KrollProxy;
+import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.proxy.TiViewProxy;
 import org.appcelerator.titanium.util.Log;
 import org.appcelerator.titanium.util.TiConfig;
@@ -22,22 +23,22 @@ import android.content.DialogInterface.OnCancelListener;
 
 public class TiUIDialog extends TiUIView
 {
-	private static final String LCAT = "TiUIButton";
+	private static final String LCAT = "TiUIDialog";
 	private static final boolean DBG = TiConfig.LOGD;
+	private static final int BUTTON_MASK = 0x10000000;
 
 	protected Builder builder;
 	protected AlertDialog dialog;
+	protected TiUIView view;
 
 	protected class ClickHandler implements DialogInterface.OnClickListener {
-
 		private int result;
-
 		public ClickHandler(int id) {
 			this.result = id;
 		}
 		public void onClick(DialogInterface dialog, int which) {
 			handleEvent(result);
-			dialog.dismiss();
+			hide(null);
 		}
 	}
 
@@ -46,64 +47,89 @@ public class TiUIDialog extends TiUIView
 		if (DBG) {
 			Log.d(LCAT, "Creating a dialog");
 		}
+		createBuilder();
+	}
 
+	private Activity getCurrentActivity() {
 		Activity currentActivity = proxy.getTiContext().getTiApp().getCurrentActivity();
 		if (currentActivity == null) {
 			currentActivity = proxy.getTiContext().getActivity();
 		}
-		this.builder = new AlertDialog.Builder(currentActivity);
-		this.builder.setCancelable(true);
+		return currentActivity;
 	}
-
+	
+	private Builder getBuilder() {
+		if (builder == null) {
+			createBuilder();
+		}
+		return builder;
+	}
+	
 	@Override
-	public void processProperties(TiDict d)
-	{
-		if (d.containsKey("title")) {
-			builder.setTitle(d.getString("title"));
+	public void processProperties(KrollDict d) {
+		if (d.containsKey(TiC.PROPERTY_TITLE)) {
+			getBuilder().setTitle(d.getString(TiC.PROPERTY_TITLE));
 		}
-		if (d.containsKey("message")) {
-			builder.setMessage(d.getString("message"));
+		if (d.containsKey(TiC.PROPERTY_MESSAGE)) {
+			getBuilder().setMessage(d.getString(TiC.PROPERTY_MESSAGE));
 		}
-		if (d.containsKey("buttonNames"))
+		if (d.containsKey(TiC.PROPERTY_BUTTON_NAMES))
 		{
-			String[] buttonText = d.getStringArray("buttonNames");
+			String[] buttonText = d.getStringArray(TiC.PROPERTY_BUTTON_NAMES);
 			processButtons(buttonText);
 		}
-		if (d.containsKey("options")) {
-			String[] optionText = d.getStringArray("options");
-			processOptions(optionText);
+		if (d.containsKeyAndNotNull(TiC.PROPERTY_ANDROID_VIEW)) {
+			processView((TiViewProxy) proxy.getProperty(TiC.PROPERTY_ANDROID_VIEW));
+		} else if (d.containsKey(TiC.PROPERTY_OPTIONS)) {
+			String[] optionText = d.getStringArray(TiC.PROPERTY_OPTIONS);
+			int selectedIndex = d.containsKey(TiC.PROPERTY_SELECTED_INDEX) ? d.getInt(TiC.PROPERTY_SELECTED_INDEX) : -1; 
+			if(selectedIndex >= optionText.length){
+				if (DBG) {
+					Log.d(LCAT, "Ooops invalid selected index specified: " + selectedIndex);
+				}
+				selectedIndex = -1;
+			}
+			
+			processOptions(optionText, selectedIndex);
 		}
-
 		super.processProperties(d);
 	}
 
 	private void processOptions(String[] optionText) {
-		builder.setSingleChoiceItems(optionText, -1 , new DialogInterface.OnClickListener() {
-
+		getBuilder().setSingleChoiceItems(optionText, -1 , new DialogInterface.OnClickListener() {
 			public void onClick(DialogInterface dialog, int which) {
 				handleEvent(which);
 				dialog.dismiss();
-			}});
+			}
+		});
 	}
 
-	private void processButtons(String[] buttonText)
-	{
-		builder.setPositiveButton(null, null);
-		builder.setNegativeButton(null, null);
-		builder.setNeutralButton(null, null);
+	private void processOptions(String[] optionText,int selectedIndex) {
+		getBuilder().setSingleChoiceItems(optionText, selectedIndex , new DialogInterface.OnClickListener() {
+			public void onClick(DialogInterface dialog, int which) {
+				handleEvent(which);
+				dialog.dismiss();
+			}
+		});
+	}
+	
+	private void processButtons(String[] buttonText) {
+		getBuilder().setPositiveButton(null, null);
+		getBuilder().setNegativeButton(null, null);
+		getBuilder().setNeutralButton(null, null);
 
 		for (int id = 0; id < buttonText.length; id++) {
 			String text = buttonText[id];
-			ClickHandler clicker = new ClickHandler(id);
+			ClickHandler clicker = new ClickHandler(id | BUTTON_MASK);
 			switch (id) {
 			case 0:
-				builder.setPositiveButton(text, clicker);
+				getBuilder().setPositiveButton(text, clicker);
 				break;
 			case 1:
-				builder.setNeutralButton(text, clicker);
+				getBuilder().setNeutralButton(text, clicker);
 				break;
 			case 2:
-				builder.setNegativeButton(text, clicker);
+				getBuilder().setNegativeButton(text, clicker);
 				break;
 			default:
 				Log.e(LCAT, "Only 3 buttons are supported");
@@ -111,57 +137,89 @@ public class TiUIDialog extends TiUIView
 		}
 	}
 
+	private void processView(TiViewProxy proxy) {
+		if (proxy != null) {
+			view = proxy.getView(getCurrentActivity());
+			getBuilder().setView(view.getNativeView());
+		}
+	}
 
 	@Override
-	public void propertyChanged(String key, Object oldValue, Object newValue, TiProxy proxy)
+	public void propertyChanged(String key, Object oldValue, Object newValue, KrollProxy proxy)
 	{
 		if (DBG) {
 			Log.d(LCAT, "Property: " + key + " old: " + oldValue + " new: " + newValue);
 		}
 
-		if (key.equals("title")) {
+		if (key.equals(TiC.PROPERTY_TITLE)) {
 			if (dialog != null) {
 				dialog.setTitle((String) newValue);
 			}
-		} else if (key.equals("message")) {
+		} else if (key.equals(TiC.PROPERTY_MESSAGE)) {
 			if (dialog != null) {
 				dialog.setMessage((String) newValue);
 			}
-		} else if (key.equals("buttonNames")) {
+		} else if (key.equals(TiC.PROPERTY_BUTTON_NAMES)) {
 			if (dialog != null) {
 				dialog.dismiss();
 				dialog = null;
 			}
 
 			processButtons(TiConvert.toStringArray((Object[]) newValue));
-		} else if (key.equals("options")) {
+		} else if (key.equals(TiC.PROPERTY_OPTIONS)) {
 			if (dialog != null) {
 				dialog.dismiss();
 				dialog = null;
 			}
 
-			processOptions(TiConvert.toStringArray((Object[]) newValue));
+			getBuilder().setView(null);
+			int selectedIndex = -1;
+			if (proxy.hasProperty(TiC.PROPERTY_SELECTED_INDEX)) {
+				selectedIndex = TiConvert.toInt(proxy.getProperty(TiC.PROPERTY_SELECTED_INDEX));
+			}
+			processOptions(TiConvert.toStringArray((Object[]) newValue), selectedIndex);
+		} else if (key.equals(TiC.PROPERTY_SELECTED_INDEX)) {
+			if (dialog != null) {
+				dialog.dismiss();
+				dialog = null;
+			}
+			
+			getBuilder().setView(null);
+			if (proxy.hasProperty(TiC.PROPERTY_OPTIONS)) {
+				processOptions(TiConvert.toStringArray((Object[]) proxy.getProperty(TiC.PROPERTY_OPTIONS)), TiConvert.toInt(newValue));
+
+			}
+		} else if (key.equals(TiC.PROPERTY_ANDROID_VIEW)) {
+			if (dialog != null) {
+				dialog.dismiss();
+				dialog = null;
+			}
+			if (newValue != null) {
+				processView((TiViewProxy) newValue);
+			} else {
+				proxy.setProperty(TiC.PROPERTY_ANDROID_VIEW, null, false);
+			}
 		} else {
 			super.propertyChanged(key, oldValue, newValue, proxy);
 		}
 	}
 
-	public void show(TiDict options)
-	{
+	public void show(KrollDict options) {
 		if (dialog == null) {
-			processProperties(proxy.getDynamicProperties());
-			builder.setOnCancelListener(new OnCancelListener() {
-				
+			processProperties(proxy.getProperties());
+			getBuilder().setOnCancelListener(new OnCancelListener() {
 				@Override
 				public void onCancel(DialogInterface dlg) {
-					int cancelIndex = (proxy.hasDynamicValue("cancel")) ? TiConvert.toInt(proxy.getDynamicValue("cancel")) : -1;
+					int cancelIndex = (proxy.hasProperty(TiC.PROPERTY_CANCEL)) ? TiConvert.toInt(proxy.getProperty(TiC.PROPERTY_CANCEL)) : -1;
 					if (DBG) {
 						Log.d(LCAT, "onCancelListener called. Sending index: " + cancelIndex);
 					}
 					handleEvent(cancelIndex);
+					hide(null);
 				}
 			});
-			dialog = builder.create();
+			dialog = getBuilder().create();
+			builder = null;
 		}
 		try {
 			dialog.show();
@@ -170,20 +228,41 @@ public class TiUIDialog extends TiUIView
 		}
 	}
 
-	public void hide(TiDict options)
-	{
+	public void hide(KrollDict options) {
 		if (dialog != null) {
 			dialog.dismiss();
 			dialog = null;
 		}
+		if (view != null) {
+			view.getProxy().releaseViews();
+			view = null;
+		}
 	}
 
-	public void handleEvent(int id)
-	{
-		int cancelIndex = (proxy.hasDynamicValue("cancel")) ? TiConvert.toInt(proxy.getDynamicValue("cancel")) : -1;
-		TiDict data = new TiDict();
-		data.put("index", id);
-		data.put("cancel", id == cancelIndex);
-		proxy.fireEvent("click", data);
+	private void createBuilder()  {
+		Activity currentActivity = getCurrentActivity();
+		
+		this.builder = new AlertDialog.Builder(currentActivity);
+		this.builder.setCancelable(true);
+	}
+	
+	public void handleEvent(int id) {
+		int cancelIndex = (proxy.hasProperty(TiC.PROPERTY_CANCEL)) ?
+			TiConvert.toInt(proxy.getProperty(TiC.PROPERTY_CANCEL)) : -1;
+		KrollDict data = new KrollDict();
+		if ((id & BUTTON_MASK) != 0) {
+			data.put("button", true);
+			id &= ~BUTTON_MASK;
+		} else {
+			data.put("button", false);
+			// If an option was selected and the user accepted it, update the proxy.
+			if (proxy.hasProperty(TiC.PROPERTY_OPTIONS)) {
+				proxy.setProperty(TiC.PROPERTY_SELECTED_INDEX, id, false);
+			}
+		}
+		data.put(TiC.EVENT_PROPERTY_INDEX, id);
+		
+		data.put(TiC.PROPERTY_CANCEL, id == cancelIndex);
+		proxy.fireEvent(TiC.EVENT_CLICK, data);
 	}
 }

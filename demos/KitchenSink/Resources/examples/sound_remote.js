@@ -7,7 +7,7 @@ var url = Titanium.UI.createTextField({
 	keyboardType:Titanium.UI.KEYBOARD_URL,
 	hintText:'url',
 	textAlign:'left',
-	clearOnEdit:true,
+	clearOnEdit:false, // this set to true was clearing the field on launch
 	height:35,
 	top:10,
 	width:300,
@@ -61,7 +61,7 @@ streamButton.addEventListener('click',function()
 		progressLabel.text = 'Stopped';
 		streamer.stop();
 		pauseButton.enabled = false;
-		pauseButton.title = 'Pause Streaming'
+		pauseButton.title = 'Pause Streaming';
 		streamButton.title = "Start Streaming";
 	}
 	else
@@ -70,7 +70,7 @@ streamButton.addEventListener('click',function()
 		streamer.url = url.value;
 		streamer.start();
 		pauseButton.enabled = true;
-		pauseButton.title = 'Pause Streaming'
+		pauseButton.title = 'Pause Streaming';
 		streamButton.title = "Stop Stream";
 	}
 });
@@ -94,6 +94,12 @@ streamer.addEventListener('progress',function(e)
 streamer.addEventListener('change',function(e)
 {
 	stateLabel.text = 'State: '+e.description +' ('+e.state+')';
+	if(e.description == "stopped") {
+		progressLabel.text = 'Stopped';
+		pauseButton.enabled = false;
+		pauseButton.title = 'Pause Streaming';
+		streamButton.title = "Start Streaming";
+	}
 });
 
 // save off current idle timer state
@@ -106,7 +112,7 @@ Ti.App.idleTimerDisabled = true;
 win.addEventListener('close',function()
 {
 	Ti.API.info("window was closed, idleTimer reset to = "+idleTimer);
-	
+
 	// restore previous idle state when closed
 	Ti.App.idleTimerDisabled = idleTimer;
 });

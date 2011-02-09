@@ -6,94 +6,47 @@
  */
 package ti.modules.titanium.ui.android.optionmenu;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-
+import org.appcelerator.kroll.KrollDict;
+import org.appcelerator.kroll.KrollInvocation;
+import org.appcelerator.kroll.KrollModule;
+import org.appcelerator.kroll.annotations.Kroll;
 import org.appcelerator.titanium.TiContext;
-import org.appcelerator.titanium.TiModule;
-import org.appcelerator.titanium.TiProxy;
-import org.appcelerator.titanium.util.TiConvert;
-import org.appcelerator.titanium.util.TiFileHelper;
+import org.appcelerator.titanium.util.TiActivitySupport;
 
-import android.graphics.drawable.Drawable;
-import android.view.Menu;
-import android.view.MenuItem;
+//import ti.modules.titanium.android.MenuItemProxy;
+//import ti.modules.titanium.android.MenuProxy;
+//import ti.modules.titanium.android.TiMenuDispatchListener;
+import ti.modules.titanium.ui.android.AndroidModule;
 
-public class OptionMenuModule extends TiModule {
+@Kroll.module(parentModule=AndroidModule.class)
+public class OptionMenuModule extends KrollModule {
 
 	public OptionMenuModule(TiContext tiContext) {
 		super(tiContext);
 	}
 
-	@Override
-	public void propertyChanged(String key, Object oldValue, Object newValue, TiProxy proxy)
-	{
-		if ("menu".equals(key)) {
-			setMenuListener((MenuProxy) newValue);
-		} else {
-			super.propertyChanged(key, oldValue, newValue, proxy);
-		}
-	}
-
-	private void setMenuListener(final MenuProxy menu)
-	{
-		menu.getTiContext().setOnMenuEventListener(new TiContext.OnMenuEvent()
-		{
-
-			private HashMap<Integer, MenuItemProxy> itemMap;
-
-			private MenuProxy getMenuProxy() {
-				return (MenuProxy) menu;
-			}
-
-			@Override
-			public boolean hasMenu()
-			{
-				return getMenuProxy() != null;
-			}
-
-			@Override
-			public boolean menuItemSelected(MenuItem item) {
-				MenuItemProxy mip = itemMap.get(item.getItemId());
-				if (mip != null) {
-					mip.fireEvent("click", null);
-					return true;
-				}
-				return false;
-			}
-
-			@Override
-			public boolean prepareMenu(Menu menu)
-			{
-				menu.clear();
-				MenuProxy mp = getMenuProxy();
-				if (mp != null) {
-					ArrayList<MenuItemProxy> menuItems = mp.getMenuItems();
-					itemMap = new HashMap<Integer, MenuItemProxy>(menuItems.size());
-					int id = 0;
-
-					for (MenuItemProxy mip : menuItems) {
-						String title = TiConvert.toString(mip.getDynamicValue("title"));
-						if (title != null) {
-							MenuItem mi = menu.add(0, id, 0, title);
-							itemMap.put(id, mip);
-							id += 1;
-
-							String iconPath = TiConvert.toString(mip.getDynamicValue("icon"));
-							if (iconPath != null) {
-				     			Drawable d = null;
-								TiFileHelper tfh = new TiFileHelper(getTiContext().getActivity());
-								d = tfh.loadDrawable(iconPath, false);
-								if (d != null) {
-									mi.setIcon(d);
-								}
-							}
-						}
-					}
-					return true;
-				}
-				return false;
-			}
-		});
-	}
+//	@Kroll.setProperty @Kroll.method
+//	public void setMenu(KrollInvocation invocation, MenuProxy menu) {
+//		TiContext tiContext = invocation.getTiContext();
+//		TiActivitySupport activitySupport = (TiActivitySupport) tiContext.getActivity();
+//		if (activitySupport == null) return;
+//		
+//		activitySupport.setMenuDispatchListener(new TiMenuDispatchListener(tiContext, menu));
+//	}
+//	
+//	// pre 1.5 API Compatibility
+//	
+//	@Kroll.method
+//	public MenuItemProxy createMenuItem(KrollInvocation invocation, @Kroll.argument(optional=true) KrollDict options) {
+//		MenuItemProxy menuItem = new MenuItemProxy(invocation.getTiContext());
+//		menuItem.handleCreationArgs(this, new Object[] { options });
+//		return menuItem;
+//	}
+//	
+//	@Kroll.method
+//	public MenuProxy createMenu(KrollInvocation invocation, @Kroll.argument(optional=true) KrollDict options) {
+//		MenuProxy menu = new MenuProxy(invocation.getTiContext());
+//		menu.handleCreationArgs(this, new Object[] { options });
+//		return menu;
+//	}
 }

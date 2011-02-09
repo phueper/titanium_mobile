@@ -99,6 +99,22 @@
 	}	
 }
 
+-(UIView *)parentViewForChild:(TiViewProxy *)child
+{	//TODO: Remove and put in the proxy where it belongs.
+	int index = [views indexOfObject:child];
+	if (index == NSNotFound)
+	{
+		return nil;
+	}
+	NSArray * scrollWrappers = [[self scrollview] subviews];
+	if (index < [scrollWrappers count])
+	{
+		return [scrollWrappers objectAtIndex:index];
+	}
+	//TODO: Generate the view?
+	return nil;
+}
+
 -(void)renderViewForIndex:(int)index
 {
 	UIScrollView *sv = [self scrollview];
@@ -111,15 +127,16 @@
 	}
 
 	UIView *wrapper = [svSubviews objectAtIndex:index];
+	TiViewProxy *viewproxy = [views objectAtIndex:index];
 	if ([[wrapper subviews] count]==0)
 	{
 		// we need to realize this view
-		TiViewProxy *viewproxy = [views objectAtIndex:index];
 		[viewproxy windowWillOpen];
 		TiUIView *uiview = [viewproxy view];
 		[wrapper addSubview:uiview];
 		[viewproxy reposition];
 	}
+	[viewproxy parentWillShow];
 }
 
 -(void)loadNextFrames:(BOOL)forward
@@ -190,12 +207,12 @@
 	
 	if (currentPage==0)
 	{
-		[self loadNextFrames:true];
+		[self loadNextFrames:YES];
 	}
 	
 	if (readd)
 	{
-		[self renderViewForIndex:currentPage];
+		[self loadNextFrames:YES];
 	}
 	
 	CGRect contentBounds;
@@ -326,11 +343,11 @@
 	
 	if (pageNum >= existingPage)
 	{
-		[self loadNextFrames:true];
+		[self loadNextFrames:YES];
 	}
 	else
 	{
-		[self loadNextFrames:false];
+		[self loadNextFrames:NO];
 	}
 	
 	[self.proxy replaceValue:NUMINT(pageNum) forKey:@"currentPage" notification:NO];
@@ -388,11 +405,11 @@
 		
 		if (newPage > existingPage)
 		{
-			[self loadNextFrames:true];
+			[self loadNextFrames:YES];
 		}
 		else
 		{
-			[self loadNextFrames:false];
+			[self loadNextFrames:NO];
 		}
 		
 		[self.proxy replaceValue:NUMINT(newPage) forKey:@"currentPage" notification:NO];
@@ -422,11 +439,11 @@
 	
 	if (pageNum > existingPage)
 	{
-		[self loadNextFrames:true];
+		[self loadNextFrames:YES];
 	}
 	else
 	{
-		[self loadNextFrames:false];
+		[self loadNextFrames:NO];
 	}
 	
 	[self.proxy replaceValue:NUMINT(pageNum) forKey:@"currentPage" notification:NO];
@@ -444,9 +461,13 @@
 {
 	//switch page control at 50% across the center - this visually looks better
     CGFloat pageWidth = scrollview.frame.size.width;
+	int lastPage = [pageControl currentPage];
     int page = floor((scrollview.contentOffset.x - pageWidth / 2) / pageWidth) + 1;
-    pageControl.currentPage = page;
-	[self loadNextFrames:YES];
+	if (lastPage != page) {
+		[pageControl setCurrentPage:page];
+		currentPage = page;
+		[self loadNextFrames:(page > lastPage)];
+	}
 }
 
 -(void)scrollViewDidEndScrollingAnimation:(UIScrollView *)scrollView

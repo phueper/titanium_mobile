@@ -8,15 +8,19 @@ package ti.modules.titanium.ui.widget.tableview;
 
 import java.util.ArrayList;
 
+import org.appcelerator.kroll.KrollDict;
+import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.TiContext;
-import org.appcelerator.titanium.TiDict;
+import org.appcelerator.titanium.TiDimension;
 import org.appcelerator.titanium.proxy.TiViewProxy;
+import org.appcelerator.titanium.util.Log;
 import org.appcelerator.titanium.util.TiConfig;
 import org.appcelerator.titanium.util.TiConvert;
 import org.appcelerator.titanium.view.TiCompositeLayout;
 import org.appcelerator.titanium.view.TiUIView;
-import org.appcelerator.titanium.util.Log;
 
+import ti.modules.titanium.ui.LabelProxy;
+import ti.modules.titanium.ui.TableViewProxy;
 import ti.modules.titanium.ui.TableViewRowProxy;
 import ti.modules.titanium.ui.widget.TiUILabel;
 import ti.modules.titanium.ui.widget.tableview.TableViewModel.Item;
@@ -25,11 +29,10 @@ import android.graphics.drawable.Drawable;
 import android.os.Handler;
 import android.view.View;
 import android.widget.ImageView;
-import android.widget.TextView;
 
 public class TiTableViewRowProxyItem extends TiBaseTableViewItem
 {
-	private static final String LCAT = "TitaniamTableViewItem";
+	private static final String LCAT = "TitaniumTableViewItem";
 	private static final boolean DBG = TiConfig.LOGD;
 
 	private static final int LEFT_MARGIN = 5;
@@ -39,33 +42,37 @@ public class TiTableViewRowProxyItem extends TiBaseTableViewItem
 	private ImageView leftImage;
 	private ImageView rightImage;
 	private TiCompositeLayout content;
-	private TiUIView[] views;
+	private ArrayList<TiUIView> views;
 	private boolean hasControls;
 	private int height = -1;
 	private Item item;
+	private Object selectorSource;
+	private Drawable selectorDrawable;
 
-	public TiTableViewRowProxyItem(TiContext tiContext)
-	{
+	public TiTableViewRowProxyItem(TiContext tiContext) {
 		super(tiContext);
 
 		this.handler = new Handler(this);
 		this.leftImage = new ImageView(tiContext.getActivity());
 		leftImage.setVisibility(GONE);
-		addView(leftImage,new LayoutParams(LayoutParams.WRAP_CONTENT,LayoutParams.WRAP_CONTENT));
+		addView(leftImage, new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
 
-		this.content = new TiCompositeLayout(tiContext.getActivity(), false);
+		this.content = new TiCompositeLayout(tiContext.getActivity());
 		content.setMinimumHeight(48);
-		addView(content, new LayoutParams(LayoutParams.FILL_PARENT,LayoutParams.WRAP_CONTENT));
+		addView(content, new LayoutParams(LayoutParams.FILL_PARENT, LayoutParams.FILL_PARENT));
 
 		this.rightImage = new ImageView(tiContext.getActivity());
 		rightImage.setVisibility(GONE);
-		addView(rightImage,new LayoutParams(LayoutParams.WRAP_CONTENT,LayoutParams.WRAP_CONTENT));
+		addView(rightImage, new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
 	}
 
-	public void setRowData(Item item)
-	{
+	protected TableViewRowProxy getRowProxy() {
+		return (TableViewRowProxy)item.proxy;
+	}
+
+	public void setRowData(Item item) {
 		this.item = item;
-		TableViewRowProxy rp = (TableViewRowProxy) item.proxy;
+		TableViewRowProxy rp = getRowProxy();
 		rp.setTableViewItem(this);
 		setRowData(rp);
 	}
@@ -74,17 +81,134 @@ public class TiTableViewRowProxyItem extends TiBaseTableViewItem
 		return this.item;
 	}
 
-	public void setRowData(TableViewRowProxy rp)
+	protected TiViewProxy addViewToOldRow(int index, TiUIView titleView, TiViewProxy newViewProxy) {
+		if (DBG) {
+			Log.w(LCAT, newViewProxy + " was added an old style row, reusing the title TiUILabel");
+		}
+		LabelProxy label = new LabelProxy(tiContext);
+		label.handleCreationDict(titleView.getProxy().getProperties());
+		label.setView(titleView);
+		label.setModelListener(titleView);
+		titleView.setProxy(label);
+
+		getRowProxy().getControls().add(index, label);
+		views.add(newViewProxy.getView(tiContext.getActivity()));
+		return label;
+	}
+
+	protected void refreshControls()
 	{
-		TiDict props = rp.getDynamicProperties();
+		ArrayList<TiViewProxy> proxies = getRowProxy().getControls();
+		int len = proxies.size();
+
+		if (views == null) {
+			views = new ArrayList<TiUIView>(len);
+		} else if (views.size() != len) {
+			for (TiUIView view : views) {
+				View v = view.getNativeView();
+				if (v != null && v.getParent().equals(content)) {
+					content.removeView(v);
+				}
+			}
+			views = new ArrayList<TiUIView>(len);
+		}
+
+		for (int i = 0; i < len; i++) {
+			TiUIView view = views.size() > i ? views.get(i) : null;
+			TiViewProxy proxy = proxies.get(i);
+			if (view != null && view.getProxy() instanceof TableViewRowProxy) {
+				proxy = addViewToOldRow(i, view, proxy);
+				len++;
+			}
+			if (view == null) {
+				// In some cases the TiUIView for this proxy has been reassigned to another proxy
+				// We don't want to actually release it though, just reassign by creating a new view
+				view = proxy.forceCreateView(tiContext.getActivity());
+				clearChildViews(proxy);
+				if (i >= views.size()) {
+					views.add(view);
+				} else {
+					views.set(i, view);
+				}
+			}
+
+			View v = view.getNativeView();
+			view.setProxy(proxy);
+			view.processProperties(proxy.getProperties());
+			applyChildProxies(proxy, view);
+			if (v.getParent() == null) {
+				content.addView(v, view.getLayoutParams());
+			}
+		}
+	}
+
+	protected void clearChildViews(TiViewProxy parent)
+	{
+		for (TiViewProxy childProxy : parent.getChildren()) {
+			childProxy.setView(null);
+			clearChildViews(childProxy);
+		}
+	}
+
+	protected void applyChildProxies(TiViewProxy viewProxy, TiUIView view)
+	{
+		int i = 0;
+		TiViewProxy childProxies[] = viewProxy.getChildren();
+		for (TiUIView childView : view.getChildren()) {
+			TiViewProxy childProxy = childProxies[i];
+			childView.setProxy(childProxy);
+			childView.processProperties(childProxy.getProperties());
+			applyChildProxies(childProxy, childView);
+			i++;
+		}
+	}
+
+	protected void refreshOldStyleRow()
+	{
+		TableViewRowProxy rp = getRowProxy();
+		if (!rp.hasProperty(TiC.PROPERTY_TOUCH_ENABLED)) {
+			rp.setProperty(TiC.PROPERTY_TOUCH_ENABLED, false);
+		}
+		if (views == null) {
+			views = new ArrayList<TiUIView>();
+			views.add(new TiUILabel(rp));
+		}
+		TiUILabel t = (TiUILabel) views.get(0);
+		t.setProxy(rp);
+		t.processProperties(filterProperties(rp.getProperties()));
+		View v = t.getNativeView();
+		if (v.getParent() == null) {
+			TiCompositeLayout.LayoutParams params = (TiCompositeLayout.LayoutParams) t.getLayoutParams();
+			params.optionLeft = new TiDimension(5, TiDimension.TYPE_LEFT);
+			params.optionRight = new TiDimension(5, TiDimension.TYPE_RIGHT);
+			params.autoFillsWidth = true;
+			content.addView(v, params);
+		}
+	}
+
+	public void setRowData(TableViewRowProxy rp) {
+		KrollDict props = rp.getProperties();
 		hasControls = rp.hasControls();
+		
+		Object newSelectorSource = null;
+		if (rp.hasProperty(TiC.PROPERTY_BACKGROUND_SELECTED_IMAGE)) {
+			newSelectorSource = rp.getProperty(TiC.PROPERTY_BACKGROUND_SELECTED_IMAGE);
+		} else if (rp.hasProperty(TiC.PROPERTY_BACKGROUND_SELECTED_COLOR)) {
+			newSelectorSource = rp.getProperty(TiC.PROPERTY_BACKGROUND_SELECTED_COLOR);
+		}
+		if (newSelectorSource == null || selectorSource != null && !selectorSource.equals(newSelectorSource)) {
+			selectorDrawable = null;
+		}
+		selectorSource = newSelectorSource;
+		if (selectorSource != null) {
+			rp.getTable().getTableView().getTableView().enableCustomSelector();
+		}
 
 		setBackgroundFromProperties(props);
-
 		// Handle right image
 		boolean clearRightImage = true;
-		if (props.containsKey("hasChild")) {
-			if (TiConvert.toBoolean(props, "hasChild")) {
+		if (props.containsKey(TiC.PROPERTY_HAS_CHILD)) {
+			if (TiConvert.toBoolean(props, TiC.PROPERTY_HAS_CHILD)) {
 				if (hasChildDrawable == null) {
 					hasChildDrawable = createHasChildDrawable();
 				}
@@ -93,8 +217,8 @@ public class TiTableViewRowProxyItem extends TiBaseTableViewItem
 				clearRightImage = false;
 			}
 		}
-		else if (props.containsKey("hasCheck")) {
-			if (TiConvert.toBoolean(props, "hasCheck")) {
+		else if (props.containsKey(TiC.PROPERTY_HAS_CHECK)) {
+			if (TiConvert.toBoolean(props, TiC.PROPERTY_HAS_CHECK)) {
 				if (hasCheckDrawable == null) {
 					hasCheckDrawable = createHasCheckDrawable();
 				}
@@ -104,10 +228,9 @@ public class TiTableViewRowProxyItem extends TiBaseTableViewItem
 			}
 		}
 
-		if (props.containsKey("rightImage")) {
-			String path = TiConvert.toString(props, "rightImage");
+		if (props.containsKey(TiC.PROPERTY_RIGHT_IMAGE)) {
+			String path = TiConvert.toString(props, TiC.PROPERTY_RIGHT_IMAGE);
 			String url = tiContext.resolveUrl(null, path);
-
 			Drawable d = loadDrawable(url);
 			if (d != null) {
 				rightImage.setImageDrawable(d);
@@ -122,8 +245,8 @@ public class TiTableViewRowProxyItem extends TiBaseTableViewItem
 		}
 
 		// Handle left image
-		if (props.containsKey("leftImage")) {
-			String path = TiConvert.toString(props, "leftImage");
+		if (props.containsKey(TiC.PROPERTY_LEFT_IMAGE)) {
+			String path = TiConvert.toString(props, TiC.PROPERTY_LEFT_IMAGE);
 			String url = tiContext.resolveUrl(null, path);
 
 			Drawable d = loadDrawable(url);
@@ -136,68 +259,32 @@ public class TiTableViewRowProxyItem extends TiBaseTableViewItem
 			leftImage.setVisibility(GONE);
 		}
 
-		if (props.containsKey("height")) {
-			if (!props.get("height").equals("auto")) {
-				height = TiConvert.toInt(props, "height");
+		if (props.containsKey(TiC.PROPERTY_HEIGHT)) {
+			if (!props.get(TiC.PROPERTY_HEIGHT).equals(TiC.SIZE_AUTO)) {
+				height = TiConvert.toInt(props, TiC.PROPERTY_HEIGHT);
 			}
 		}
-		
-		if (rp.getParent() != null) {
-			if (rp.getParent().hasDynamicValue("minRowHeight")) {
-				height = Math.max(height, TiConvert.toInt(rp.getParent().getDynamicProperties(), "minRowHeight"));
-			}
+
+		if (props.containsKey(TiC.PROPERTY_LAYOUT)) {
+			content.setLayoutArrangement(TiConvert.toString(props, TiC.PROPERTY_LAYOUT));
 		}
-		
 
 		if (rp.hasControls()) {
-			ArrayList<TiViewProxy> proxies = rp.getControls();
-			int len = proxies.size();
-			if (views == null) {
-				views = new TiUIView[len];
-			}
-			for (int i = 0; i < len; i++) {
-				TiUIView view = views[i];
-				TiViewProxy proxy = proxies.get(i);
-				if (view == null) {
-					if (proxy.peekView() != null) {
-						proxy.releaseViews();
-					}
-					view = proxy.getView(tiContext.getActivity());
-					views[i] = view;
-				}
-				view.setProxy(proxy);
-				view.processProperties(proxy.getDynamicProperties());
-				View v = view.getNativeView();
-				if (v.getParent() == null) {
-					content.addView(v, view.getLayoutParams());
-				}
-			}
+			refreshControls();
 		} else {
-			String title = "Missing title";
-			if (rp.getDynamicValue("title") != null) {
-				title = TiConvert.toString(rp.getDynamicValue("title"));
-			}
-
-			if (views == null) {
-				views = new TiUIView[1];
-				views[0] = new TiUILabel(rp);
-			}
-			TiUILabel t = (TiUILabel) views[0];
-			t.setProxy(rp);
-			t.processProperties(filterProperties(rp.getDynamicProperties()));
-			View v = t.getNativeView();
-			if (v.getParent() == null) {
-				TextView tv = (TextView) v;
-				//tv.setTextColor(Color.WHITE);
-				TiCompositeLayout.LayoutParams params = (TiCompositeLayout.LayoutParams) t.getLayoutParams();
-				params.optionLeft = 5;
-				params.optionRight = 5;
-				params.autoFillsWidth = true;
-				content.addView(v, params);
-			}
+			refreshOldStyleRow();
 		}
 	}
 
+	protected boolean hasView(TiUIView view) {
+		if (views == null) return false;
+		for (TiUIView v : views) {
+			if (v == view) {
+				return true;
+			}
+		}
+		return false;
+	}
 
 	@Override
 	protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec)
@@ -206,12 +293,10 @@ public class TiTableViewRowProxyItem extends TiBaseTableViewItem
 		int wMode = MeasureSpec.getMode(widthMeasureSpec);
 		int h = MeasureSpec.getSize(heightMeasureSpec);
 		int hMode = MeasureSpec.getMode(heightMeasureSpec);
-
 		int imageHMargin = 0;
 
 		int leftImageWidth = 0;
 		int leftImageHeight = 0;
-
 		if (leftImage != null && leftImage.getVisibility() != View.GONE) {
 			measureChild(leftImage, widthMeasureSpec, heightMeasureSpec);
 			leftImageWidth = leftImage.getMeasuredWidth();
@@ -221,7 +306,6 @@ public class TiTableViewRowProxyItem extends TiBaseTableViewItem
 
 		int rightImageWidth = 0;
 		int rightImageHeight = 0;
-
 		if (rightImage != null && rightImage.getVisibility() != View.GONE) {
 			measureChild(rightImage, widthMeasureSpec, heightMeasureSpec);
 			rightImageWidth = rightImage.getMeasuredWidth();
@@ -232,15 +316,26 @@ public class TiTableViewRowProxyItem extends TiBaseTableViewItem
 		int adjustedWidth = w - leftImageWidth - rightImageWidth - imageHMargin;
 		//int adjustedWidth = w;
 
-		measureChild(content, MeasureSpec.makeMeasureSpec(adjustedWidth, wMode), heightMeasureSpec);
+		if (content != null) {
+			measureChild(content, MeasureSpec.makeMeasureSpec(adjustedWidth, wMode), heightMeasureSpec);
+			if(hMode == MeasureSpec.UNSPECIFIED) {
+				TableViewProxy table = ((TableViewRowProxy)item.proxy).getTable();
+				int minRowHeight = 0;
+				if (table != null && table.hasProperty(TiC.PROPERTY_MIN_ROW_HEIGHT)) {
+					minRowHeight = TiConvert.toInt(table.getProperty(TiC.PROPERTY_MIN_ROW_HEIGHT));
+				}
 
-		if(hMode == MeasureSpec.UNSPECIFIED) {
-			if (height == -1) {
-				h = Math.max(h, Math.max(content.getMeasuredHeight(), Math.max(leftImageHeight, rightImageHeight)));
-			} else {
-				h = height;
+				if (height == -1) {
+					h = Math.max(h, Math.max(content.getMeasuredHeight(), Math.max(leftImageHeight, rightImageHeight)));
+					h = Math.max(h, minRowHeight);
+				} else {
+					h = Math.max(minRowHeight, height);
+				}
+				if (DBG) {
+					Log.d(LCAT, "Row content measure (" + adjustedWidth + "x" + h + ")");
+				}
+				measureChild(content, MeasureSpec.makeMeasureSpec(adjustedWidth, wMode), MeasureSpec.makeMeasureSpec(h, hMode));
 			}
-			measureChild(content, MeasureSpec.makeMeasureSpec(adjustedWidth, wMode), MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY));
 		}
 		
 		setMeasuredDimension(w, Math.max(h, Math.max(leftImageHeight, rightImageHeight)));
@@ -281,15 +376,19 @@ public class TiTableViewRowProxyItem extends TiBaseTableViewItem
 			contentRight = right - RIGHT_MARGIN;
 		}
 
-		content.layout(contentLeft, top, contentRight, bottom);
+		if (content != null) {
+			content.layout(contentLeft, top, contentRight, bottom);
+		}
 	}
 
 	private static String[] filteredProperties = new String[]{
-		"backgroundImage", "backgroundColor"
+		TiC.PROPERTY_BACKGROUND_IMAGE, TiC.PROPERTY_BACKGROUND_COLOR,
+		TiC.PROPERTY_BACKGROUND_SELECTED_IMAGE, TiC.PROPERTY_BACKGROUND_SELECTED_COLOR
 	};
-	private TiDict filterProperties(TiDict d)
-	{
-		TiDict filtered = new TiDict(d);
+	private KrollDict filterProperties(KrollDict d) {
+		if (d == null) return new KrollDict();
+		
+		KrollDict filtered = new KrollDict(d);
 		for (int i = 0;i < filteredProperties.length; i++) {
 			if (filtered.containsKey(filteredProperties[i])) {
 				filtered.remove(filteredProperties[i]);
@@ -299,13 +398,31 @@ public class TiTableViewRowProxyItem extends TiBaseTableViewItem
 	}
 
 	@Override
-	public boolean providesOwnSelector() {
-		return true;
+	public boolean hasSelector() {
+		KrollDict d = getRowProxy().getProperties();
+		return d.containsKey(TiC.PROPERTY_BACKGROUND_SELECTED_IMAGE)
+			|| d.containsKey(TiC.PROPERTY_BACKGROUND_SELECTED_COLOR);
 	}
 	
 	@Override
-	public void release()
-	{
+	public Drawable getSelectorDrawable() {
+		TableViewRowProxy rowProxy = getRowProxy();
+		if (selectorDrawable == null && selectorSource != null) {
+			if (rowProxy.hasProperty(TiC.PROPERTY_BACKGROUND_SELECTED_IMAGE)) {
+				String path = TiConvert.toString(
+					rowProxy.getProperty(TiC.PROPERTY_BACKGROUND_SELECTED_IMAGE));
+				String url = rowProxy.getTiContext().resolveUrl(null, path);
+				selectorDrawable = loadDrawable(url);
+			} else if (rowProxy.hasProperty(TiC.PROPERTY_BACKGROUND_SELECTED_COLOR)) {
+				int color = TiConvert.toColor(rowProxy.getProperties(), TiC.PROPERTY_BACKGROUND_SELECTED_COLOR);
+				selectorDrawable = new TiTableViewColorSelector(color);
+			}
+		}
+		return selectorDrawable;
+	}
+	
+	@Override
+	public void release() {
 		super.release();
 		if (views != null) {
 			for (TiUIView view : views) {

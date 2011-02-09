@@ -19,7 +19,7 @@
 /**
  * MODIFICATIONS:
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2011 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -31,6 +31,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
+import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.LayerDrawable;
@@ -38,6 +39,7 @@ import android.graphics.drawable.GradientDrawable.Orientation;
 import android.text.Layout;
 import android.text.StaticLayout;
 import android.text.TextPaint;
+import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.util.FloatMath;
 import android.util.TypedValue;
@@ -50,6 +52,8 @@ import android.view.View;
  * @author Yuri Kanivets
  */
 public class WheelView extends View {
+	private static final int NOVAL = -1;
+
 	/** Current value & label text color */
 	private static final int VALUE_TEXT_COLOR = 0xE0000000;
 
@@ -72,7 +76,7 @@ public class WheelView extends View {
 	//private static final int ITEM_OFFSET = TEXT_SIZE / 5;
 
 	/** Additional width for items layout */
-	private static final int ADDITIONAL_ITEMS_SPACE = 10;
+	private static final int ADDITIONAL_ITEMS_SPACE = 5;
 
 	/** Label offset */
 	private static final int LABEL_OFFSET = 8;
@@ -116,7 +120,10 @@ public class WheelView extends View {
 	
 	private WheelView.OnItemSelectedListener itemSelectedListener;
 	
-	private boolean measured = false;
+	private int textColor = NOVAL;
+	private Typeface typeface = Typeface.DEFAULT;
+	private int typefaceWeight = Typeface.NORMAL;
+	private boolean showSelectionIndicator = true;
 
 	/**
 	 * Constructor
@@ -175,7 +182,6 @@ public class WheelView extends View {
 	 */
 	public void setVisibleItems(int count) {
 		visibleItems = count;
-		invalidate();
 	}
 
 	/**
@@ -225,23 +231,57 @@ public class WheelView extends View {
 		}
 	}
 
+	private void resetTextPainters()
+	{
+		TextPaint[] painters = new TextPaint[]{itemsPaint, valuePaint};
+		for (int i = 0; i < painters.length; i++) {
+			TextPaint painter = painters[i];
+			if (painter != null) {
+				int flags = Paint.ANTI_ALIAS_FLAG;
+				if (typefaceWeight == Typeface.BOLD) {
+					flags = flags | Paint.FAKE_BOLD_TEXT_FLAG;
+				}
+				if (i == 1) {
+					flags = flags | Paint.DITHER_FLAG;
+				}
+				painter.setFlags(flags);
+				painter.setColor((textColor == NOVAL) ? ITEMS_TEXT_COLOR : textColor);
+				painter.setTypeface(typeface);
+				painter.setTextSize(textSize);
+			}
+		}
+	}
+	
 	/**
 	 * Initializes resources
 	 */
 	private void initResourcesIfNecessary() {
 		if (itemsPaint == null) {
-			itemsPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG
-					| Paint.FAKE_BOLD_TEXT_FLAG);
+			if (typefaceWeight == Typeface.BOLD) {
+				itemsPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG
+						| Paint.FAKE_BOLD_TEXT_FLAG);
+			} else {
+				itemsPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+			}
 			//itemsPaint.density = getResources().getDisplayMetrics().density;
 			itemsPaint.setTextSize(textSize);
+			itemsPaint.setTypeface(typeface);
+			itemsPaint.setColor((textColor == NOVAL) ? ITEMS_TEXT_COLOR : textColor);
 		}
 
 		if (valuePaint == null) {
-			valuePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG
-					| Paint.FAKE_BOLD_TEXT_FLAG | Paint.DITHER_FLAG);
+			if (typefaceWeight == Typeface.BOLD) {
+				valuePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG
+						| Paint.FAKE_BOLD_TEXT_FLAG | Paint.DITHER_FLAG);
+			} else {
+				valuePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG
+						| Paint.DITHER_FLAG);
+			}
 			//valuePaint.density = getResources().getDisplayMetrics().density;
 			valuePaint.setTextSize(textSize);
 			valuePaint.setShadowLayer(0.5f, 0, 0.5f, 0xFFFFFFFF);
+			valuePaint.setTypeface(typeface);
+			valuePaint.setColor((textColor == NOVAL) ? ITEMS_TEXT_COLOR : textColor);
 		}
 
 		if (centerDrawable == null) {
@@ -457,9 +497,13 @@ public class WheelView extends View {
 	 */
 	private void createLayouts(int widthItems, int widthLabel) {
 		if (itemsLayout == null || itemsLayout.getWidth() > widthItems) {
-			itemsLayout = new StaticLayout(buildText(), itemsPaint, widthItems,
+			String text = buildText();
+			if (text == null) {
+				text = "";
+			}
+			itemsLayout = new StaticLayout(text, 0, text.length(), itemsPaint, widthItems,
 					widthLabel > 0 ? Layout.Alignment.ALIGN_OPPOSITE : Layout.Alignment.ALIGN_CENTER,
-					1, getAdditionalItemHeight(), false);
+					1, getAdditionalItemHeight(), false, TextUtils.TruncateAt.END, widthItems);
 		} else {
 			itemsLayout.increaseWidthTo(widthItems);
 		}
@@ -467,9 +511,10 @@ public class WheelView extends View {
 		if (valueLayout == null || valueLayout.getWidth() > widthItems) {
 			String text = getAdapter() != null ? getAdapter().getItem(currentItem) : null;
 			valueLayout = new StaticLayout(text != null ? text : "",
+					0, text != null ? text.length() : 0,
 					valuePaint, widthItems, widthLabel > 0 ?
 							Layout.Alignment.ALIGN_OPPOSITE : Layout.Alignment.ALIGN_CENTER,
-							1, getAdditionalItemHeight(), false);
+							1, getAdditionalItemHeight(), false, TextUtils.TruncateAt.END, widthItems);
 		} else {
 			valueLayout.increaseWidthTo(widthItems);
 		}
@@ -487,7 +532,6 @@ public class WheelView extends View {
 
 	@Override
 	protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-		measured = true;
 		int widthMode = MeasureSpec.getMode(widthMeasureSpec);
 		int heightMode = MeasureSpec.getMode(heightMeasureSpec);
 		int widthSize = MeasureSpec.getSize(widthMeasureSpec);
@@ -553,7 +597,7 @@ public class WheelView extends View {
 	 * @param canvas the canvas for drawing
 	 */
 	private void drawValue(Canvas canvas) {
-		valuePaint.setColor(VALUE_TEXT_COLOR);
+		valuePaint.setColor( (textColor == NOVAL) ? VALUE_TEXT_COLOR : textColor);
 		valuePaint.drawableState = getDrawableState();
 
 		Rect bounds = new Rect();
@@ -579,7 +623,6 @@ public class WheelView extends View {
 	 * @param canvas the canvas for drawing
 	 */
 	private void drawItems(Canvas canvas) {
-		itemsPaint.setColor(ITEMS_TEXT_COLOR);
 		itemsPaint.drawableState = getDrawableState();
 		itemsLayout.draw(canvas);
 	}
@@ -589,6 +632,9 @@ public class WheelView extends View {
 	 * @param canvas the canvas for drawing
 	 */
 	private void drawCenterRect(Canvas canvas) {
+		if (!showSelectionIndicator) {
+			return;
+		}
 		int center = getHeight() / 2;
 		int offset = getHeight() / visibleItems / 2;
 		centerDrawable.setBounds(0, center - offset, getWidth(), center + offset);
@@ -644,17 +690,74 @@ public class WheelView extends View {
 		return (int) (textSize / 5);
 	}
 	
+	public void fullLayoutReset()
+	{
+		itemsLayout = null;
+		valueLayout = null;
+		requestLayout();
+	}
+	
 	public void setTextSize(int size)
 	{
-		if (measured) {
-			throw new IllegalStateException("Cannot change text size after view has been measured.");
+		int orig = textSize;
+		textSize = size;
+		if (orig != textSize) {
+			resetTextPainters();
 		}
-		textSize= size;
 	}
 	
 	public int getTextSize()
 	{
 		return textSize;
+	}
+
+	public void setTextColor(int color)
+	{
+		this.textColor = color;
+		resetTextPainters();
+		invalidate();
+	}
+
+	public void setTypeface(Typeface tf)
+	{
+		Typeface old = this.typeface;
+		this.typeface = tf;
+		if (!old.equals(tf)) {
+			resetTextPainters();
+		}
+	}
+
+	public Typeface getTypeface()
+	{
+		return this.typeface;
+	}
+
+	public void setTypefaceWeight(int weight)
+	{
+		int old = this.typefaceWeight;
+		this.typefaceWeight = weight;
+		if (old != weight) {
+			resetTextPainters();
+		}
+	}
+
+	public int getTypefaceWeight()
+	{
+		return this.typefaceWeight;
+	}
+
+	public void setShowSelectionIndicator(boolean show)
+	{
+		boolean oldval = showSelectionIndicator;
+		showSelectionIndicator = show;
+		if (oldval != show) {
+			invalidate();
+		}
+	}
+
+	public boolean getShowSelectionIndicator()
+	{
+		return showSelectionIndicator;
 	}
 }
 

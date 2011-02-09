@@ -5,12 +5,14 @@
       android:versionName="${config['appversion']}"
 >
 	<uses-sdk android:minSdkVersion="4" />
-	
-	<supports-screens android:smallScreens="false"
-                android:normalScreens="true"
-                android:largeScreens="true"
-                android:anyDensity="false"
-    />
+	<supports-screens 
+		android:smallScreens="false"
+		android:normalScreens="true"
+		android:largeScreens="true"
+		android:anyDensity="false"
+	/>
+
+	<!-- TI_MANIFEST -->
     
 	<application
     	android:icon="@drawable/appicon"
@@ -30,6 +32,7 @@
             </intent-filter>
         </activity>
 
+		<!-- TI_APPLICATION -->
 		<!-- TI_ACTIVITIES -->
 		<activity
         	android:name="org.appcelerator.titanium.TiActivity"
@@ -46,11 +49,14 @@
 			android:configChanges="keyboardHidden|orientation"
 			android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
 		/>
+		<activity android:name="ti.modules.titanium.ui.android.TiPreferencesActivity" />
 
 		<service
 			android:name="org.appcelerator.titanium.analytics.TiAnalyticsService"
 			android:exported="false"
 		/>
+		<!-- TI_SERVICES -->
+
 	</application>
 	
 	<!-- TI_PERMISSIONS -->

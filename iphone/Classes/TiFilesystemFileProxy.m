@@ -57,8 +57,23 @@
 }
 
 FILEATTR(readonly,NSFileImmutable,NO)
-FILEATTR(createTimestamp,NSFileCreationDate,YES);
 FILEATTR(modificationTimestamp,NSFileModificationDate,YES);
+
+-(id)createTimestamp
+{	
+	NSError *error = nil; 
+	NSDictionary * resultDict = [fm attributesOfItemAtPath:path error:&error];
+	if ((YES) && error!=nil)	
+	{	
+		[self throwException:TiExceptionOSError subreason:[error localizedDescription] location:CODELOCATION];	
+	}	
+	// Have to do this one up special because of 3.x bug where NSFileCreationDate is sometimes undefined
+	id result = [resultDict objectForKey:NSFileCreationDate];
+	if (result == nil) {
+		result = [resultDict objectForKey:NSFileModificationDate];
+	}
+	return result;
+}
 
 //TODO: Should this be a method or a property? Until then, do both.
 -(id)createTimestamp:(id)args
@@ -124,7 +139,7 @@ FILENOOP(setHidden:(id)x);
 	NSError *error = nil; 
 	NSDictionary * resultDict = [fm attributesOfFileSystemForPath:path error:&error];
 	if (error!=nil) return NUMBOOL(NO);
-	return NUMBOOL([resultDict objectForKey:NSFileSystemFreeSize]!=nil);
+	return [resultDict objectForKey:NSFileSystemFreeSize];
 }
 
 -(id)createDirectory:(id)args
@@ -194,20 +209,44 @@ FILENOOP(setHidden:(id)x);
 	return NUMBOOL(result);
 }
 
+-(NSString *)_grabFirstArgumentAsFileName_:(id)args {
+    NSString * arg = [args objectAtIndex:0];
+    NSString * file = FILE_TOSTR(arg);
+    NSString * dest = [file stringByStandardizingPath];
+
+    return dest;
+}
+
 -(id)move:(id)args
 {
 	ENSURE_TYPE(args,NSArray);
 	NSError * error=nil;
-	NSString * arg = [args objectAtIndex:0];
-	NSString * file = FILE_TOSTR(arg);
-	NSString * dest = [file stringByStandardizingPath];
+	NSString * dest = [self _grabFirstArgumentAsFileName_:args];
+    
+    if (![dest isAbsolutePath]) {
+        NSString * subpath = [path stringByDeletingLastPathComponent];
+        dest = [subpath stringByAppendingPathComponent:dest];
+    }
+    
 	BOOL result = [fm moveItemAtPath:path toPath:dest error:&error];
 	return NUMBOOL(result);	
 }
 
 -(id)rename:(id)args
 {
-	return [self move:args];
+    ENSURE_TYPE(args,NSArray);
+	NSString * dest = [self _grabFirstArgumentAsFileName_:args];
+    NSString * ourSubpath = [path stringByDeletingLastPathComponent];
+    
+    if ([dest isAbsolutePath]) {
+        NSString * destSubpath = [dest stringByDeletingLastPathComponent];
+
+        if (![ourSubpath isEqualToString:destSubpath]) {
+            return NUMBOOL(NO); // rename is not move
+        }
+    }
+    
+    return [self move:args];
 }
 
 -(id)read:(id)args

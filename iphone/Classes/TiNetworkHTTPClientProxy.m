@@ -4,6 +4,8 @@
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
+
+// TODO: Here's a big one... we need to conform to the SHOULD, MUST, SHOULD NOT, MUST NOT in XHR standard.  See http://www.w3.org/TR/XMLHttpRequest/
 #ifdef USE_TI_NETWORK
 
 #import "TiBase.h"
@@ -13,6 +15,7 @@
 #import "TiApp.h"
 #import "TiDOMDocumentProxy.h"
 #import "Mimetypes.h"
+#import "TiFile.h"
 
 int CaselessCompare(const char * firstString, const char * secondString, int size)
 {
@@ -149,7 +152,7 @@ extern NSString * const TI_APPLICATION_DEPLOYTYPE;
 
 -(NSString*)responseText
 {
-	if (request!=nil && [request error]==nil)
+	if (request!=nil)
 	{
 		NSData *data = [request responseData];
 		if (data==nil || [data length]==0) 
@@ -232,16 +235,18 @@ extern NSString * const TI_APPLICATION_DEPLOYTYPE;
 	return NetworkClientStateDone;
 }
 
--(void)_fireReadyStateChange:(NetworkClientState) state
+-(void)_fireReadyStateChange:(NetworkClientState)state failed:(BOOL)failed
 {
 	readyState = state;
-	TiNetworkHTTPClientResultProxy *thisPointer = [[[TiNetworkHTTPClientResultProxy alloc] initWithDelegate:self] autorelease];
+	TiNetworkHTTPClientResultProxy *thisPointer; 
 	if (onreadystatechange!=nil)
 	{
+		thisPointer = [[[TiNetworkHTTPClientResultProxy alloc] initWithDelegate:self] autorelease];
 		[self _fireEventToListener:@"readystatechange" withObject:nil listener:onreadystatechange thisObject:thisPointer];
 	}
-	if (onload!=nil && state==NetworkClientStateDone && connected)
+	if (onload!=nil && state==NetworkClientStateDone && !failed)
 	{
+		thisPointer = [[[TiNetworkHTTPClientResultProxy alloc] initWithDelegate:self] autorelease];		
 		if (ondatastream && downloadProgress>0)
 		{
 			CGFloat progress = (CGFloat)((CGFloat)downloadProgress/(CGFloat)downloadLength);
@@ -289,6 +294,7 @@ extern NSString * const TI_APPLICATION_DEPLOYTYPE;
 	RELEASE_TO_NIL(request);
 	
 	NSString *method = [TiUtils stringValue:[args objectAtIndex:0]];
+	[url release];
 	url = [[TiUtils toURL:[args objectAtIndex:1] proxy:self] retain];
 	
 	if ([args count]>2)
@@ -338,8 +344,8 @@ extern NSString * const TI_APPLICATION_DEPLOYTYPE;
 	[request setShouldAttemptPersistentConnection:keepAlive];
 	[request setShouldRedirect:YES];
 	[request setShouldPerformCallbacksOnMainThread:NO];
-	[self _fireReadyStateChange:NetworkClientStateOpened];
-	[self _fireReadyStateChange:NetworkClientStateHeaders];
+	[self _fireReadyStateChange:NetworkClientStateOpened failed:NO];
+	[self _fireReadyStateChange:NetworkClientStateHeaders failed:NO];
 }
 
 -(void)setRequestHeader:(id)args
@@ -354,13 +360,30 @@ extern NSString * const TI_APPLICATION_DEPLOYTYPE;
 	// it since we assume that the app is "trusted" (thus, cross domain ,etc)
 	if ([key isEqualToString:@"Cookie"])
 	{
+		NSMutableArray* cookies = [request requestCookies];
+		if (value == nil) {
+			[cookies removeAllObjects];
+			return;
+		}
+		
 		NSArray *tok = [value componentsSeparatedByString:@"="];
 		if ([tok count]!=2)
 		{
 			[self throwException:@"invalid arguments for setting cookie. value should be in the format 'name=value'" subreason:nil location:CODELOCATION];
 		}
-		NSHTTPCookie *cookie = [NSHTTPCookie cookieWithProperties:[NSDictionary dictionaryWithObjectsAndKeys:[tok objectAtIndex:0],NSHTTPCookieName,[tok objectAtIndex:1],NSHTTPCookieValue,@"/",NSHTTPCookiePath,[url host],NSHTTPCookieDomain,url,NSHTTPCookieOriginURL,nil]];
-		[[request requestCookies] addObject:cookie];
+		NSString* name = [tok objectAtIndex:0];
+		id cookieValue = [tok objectAtIndex:1];
+		
+		for (NSHTTPCookie* cookie in cookies) {
+			if ([name isEqualToString:[cookie name]])
+			{
+				[cookies removeObject:cookie];
+				break;
+			}
+		}
+		
+		NSHTTPCookie *cookie = [NSHTTPCookie cookieWithProperties:[NSDictionary dictionaryWithObjectsAndKeys:name,NSHTTPCookieName,cookieValue,NSHTTPCookieValue,@"/",NSHTTPCookiePath,[url host],NSHTTPCookieDomain,url,NSHTTPCookieOriginURL,nil]];
+		[cookies addObject:cookie];
 	}
 	else 
 	{
@@ -370,6 +393,13 @@ extern NSString * const TI_APPLICATION_DEPLOYTYPE;
 
 -(void)send:(id)args
 {
+	// HACK: We are never actually in the "OPENED" state.  Needs to be fixed with XHR refactor.
+	if (readyState != NetworkClientStateHeaders && readyState != NetworkClientStateOpened) {
+		// TODO: Throw an exception here as per XHR standard
+		NSLog(@"[ERROR] Must set a connection to OPENED before send()");
+		return;
+	}
+	
 	// args are optional
 	if (args!=nil)
 	{
@@ -434,7 +464,7 @@ extern NSString * const TI_APPLICATION_DEPLOYTYPE;
 	downloadProgress = 0;
 	uploadProgress = 0;
 	[[TiApp app] startNetwork];
-	[self _fireReadyStateChange:NetworkClientStateLoading];
+	[self _fireReadyStateChange:NetworkClientStateLoading failed:NO];
 	[request setAllowCompressedResponse:YES];
 	
 	// allow self-signed certs (NO) or required valid SSL (YES)
@@ -463,29 +493,49 @@ extern NSString * const TI_APPLICATION_DEPLOYTYPE;
 	return nil;
 }
 
+-(NSString*)file
+{
+	return [request downloadDestinationPath];
+}
+
+-(void)setFile:(id)file
+{
+	if ([file isKindOfClass:[NSString class]]) {
+		[request setDownloadDestinationPath:file];
+	}
+	else if ([file isKindOfClass:[TiFile class]]) {
+		[request setDownloadDestinationPath:[file path]];
+	}
+	else {
+		[self throwException:[NSString stringWithFormat:@"Invalid class %@ for file: Expected string or file",[file class]]
+				   subreason:nil
+					location:CODELOCATION];
+	}
+}
+
+-(NSDictionary*)responseHeaders
+{
+	return [request responseHeaders];
+}
+
 #pragma mark Delegates
 
 -(void)requestFinished:(ASIHTTPRequest *)request_
 {
-	[self _fireReadyStateChange:NetworkClientStateDone];
-	if (connected)
-	{
-		connected = NO;
-		[[TiApp app] stopNetwork];
-	}
+	[self _fireReadyStateChange:NetworkClientStateDone failed:NO];
+	connected = NO;
+	[[TiApp app] stopNetwork];
 }
 
 -(void)requestFailed:(ASIHTTPRequest *)request_
 {
-	if (connected)
-	{
-		[[TiApp app] stopNetwork];
-		connected=NO;
-	}
+	[[TiApp app] stopNetwork];
+	connected=NO;
 	
 	NSError *error = [request error];
 	
-	[self _fireReadyStateChange:NetworkClientStateDone];
+	// TODO: Conform to XHR 'DONE' on error
+	[self _fireReadyStateChange:NetworkClientStateDone failed:YES];
 	
 	if (onerror!=nil)
 	{

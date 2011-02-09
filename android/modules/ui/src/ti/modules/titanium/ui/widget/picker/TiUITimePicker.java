@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2011 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -9,14 +9,15 @@ package ti.modules.titanium.ui.widget.picker;
 import java.util.Calendar;
 import java.util.Date;
 
-import org.appcelerator.titanium.TiDict;
-import org.appcelerator.titanium.TiProxy;
+import org.appcelerator.kroll.KrollDict;
+import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.titanium.proxy.TiViewProxy;
 import org.appcelerator.titanium.util.Log;
 import org.appcelerator.titanium.util.TiConfig;
 import org.appcelerator.titanium.util.TiConvert;
 import org.appcelerator.titanium.view.TiUIView;
 
+import android.app.Activity;
 import android.widget.TimePicker;
 import android.widget.TimePicker.OnTimeChangedListener;
 
@@ -33,18 +34,22 @@ public class TiUITimePicker extends TiUIView
 	public TiUITimePicker(TiViewProxy proxy)
 	{
 		super(proxy);
+	}
+	public TiUITimePicker(TiViewProxy proxy, Activity activity)
+	{
+		this(proxy);
 		if (DBG) {
 			Log.d(LCAT, "Creating a time picker");
 		}
 		
-		TimePicker picker = new TimePicker(proxy.getContext());
+		TimePicker picker = new TimePicker(activity);
 		picker.setIs24HourView(false);
 		picker.setOnTimeChangedListener(this);
 		setNativeView(picker);
 	}
 	
 	@Override
-	public void processProperties(TiDict d) {
+	public void processProperties(KrollDict d) {
 		super.processProperties(d);
 		
 		boolean valueExistsInProxy = false;
@@ -78,7 +83,7 @@ public class TiUITimePicker extends TiUIView
         setValue(calendar.getTimeInMillis() , true);
         
         if (!valueExistsInProxy) {
-        	proxy.internalSetDynamicValue("value", calendar.getTime(), false);
+        	proxy.setProperty("value", calendar.getTime());
         }
         
         //iPhone ignores both values if max <= min
@@ -93,7 +98,7 @@ public class TiUITimePicker extends TiUIView
 	
 	@Override
 	public void propertyChanged(String key, Object oldValue, Object newValue,
-			TiProxy proxy)
+			KrollProxy proxy)
 	{
 		if (key.equals("value")) {
 			Date date = (Date)newValue;
@@ -130,11 +135,11 @@ public class TiUITimePicker extends TiUIView
 		calendar.set(Calendar.HOUR_OF_DAY, hourOfDay);
 		calendar.set(Calendar.MINUTE, minute);
 		if (!suppressChangeEvent) {
-			TiDict data = new TiDict();
+			KrollDict data = new KrollDict();
 			data.put("value", calendar.getTime());
 			proxy.fireEvent("change", data);		
 		}
 		// Make sure .value is readable by user
-		proxy.internalSetDynamicValue("value", calendar.getTime(), false);
+		proxy.setProperty("value", calendar.getTime());
 	}
 }

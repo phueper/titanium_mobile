@@ -36,10 +36,13 @@ NSString * const kTiWillShutdownNotification = @"TiWillShutdown";
 NSString * const kTiShutdownNotification = @"TiShutdown";
 NSString * const kTiSuspendNotification = @"TiSuspend";
 NSString * const kTiResumeNotification = @"TiResume";
+NSString * const kTiResumedNotification = @"TiResumed";
 NSString * const kTiAnalyticsNotification = @"TiAnalytics";
 NSString * const kTiRemoteDeviceUUIDNotification = @"TiDeviceUUID";
 NSString * const kTiGestureShakeNotification = @"TiGestureShake";
 NSString * const kTiRemoteControlNotification = @"TiRemoteControl";
 
-
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_4_0
+NSString * const kTiLocalNotification = @"TiLocalNotification";
+#endif
 

@@ -9,53 +9,125 @@ package org.appcelerator.titanium.util;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
+import java.lang.reflect.Method;
+import java.util.Currency;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
+import java.util.StringTokenizer;
 import java.util.UUID;
 
 import org.appcelerator.titanium.ITiAppInfo;
 import org.appcelerator.titanium.TiApplication;
 
 import android.Manifest;
+import android.app.Activity;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.content.res.Resources;
 import android.net.ConnectivityManager;
+import android.net.DhcpInfo;
 import android.net.NetworkInfo;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.provider.Settings;
+import android.text.format.Formatter;
+import android.util.DisplayMetrics;
 
 public class TiPlatformHelper
 {
 	public static final String LCAT = "TiPlatformHelper";
 	public static final boolean DBG = TiConfig.LOGD;
+	private static final Map<String, Locale> locales = java.util.Collections.synchronizedMap(new HashMap<String, Locale>());
+	private static final Map<Locale,  String> currencyCodes = java.util.Collections.synchronizedMap(new HashMap<Locale, String>());
+	private static final Map<Locale,  String> currencySymbols = java.util.Collections.synchronizedMap(new HashMap<Locale, String>());
+	private static final Map<String,  String> currencySymbolsByCode = java.util.Collections.synchronizedMap(new HashMap<String, String>());
 
 	public static String platformId;
 	public static String sessionId;
 	public static StringBuilder sb = new StringBuilder(256);
+	public static float applicationScaleFactor = 1.0F;
+	public static int applicationLogicalDensity = DisplayMetrics.DENSITY_MEDIUM;
+	private static boolean applicationDisplayInfoInitialized = false;
 
-	private static TiApplication tiApp;
-
-	public static void initialize(TiApplication app) {
-		tiApp = app;
-
+	public static void initialize() {
+		TiApplication app = TiApplication.getInstance();
+		// what is platform id?
 		platformId = Settings.Secure.getString(app.getContentResolver(), Settings.Secure.ANDROID_ID);
+
+		// this is a fix for the emulator only I think as a normal device should
+		// never return null
 		if (platformId == null) {
+			Log.e(LCAT, "platformId is null, setting to empty string");
 			platformId = "";
-			TiDatabaseHelper db = new TiDatabaseHelper(app);
-			platformId = db.getPlatformParam("unique_machine_id",null);
-			if (platformId == null)
-			{
-				platformId = createUUID();
-				db.setPlatformParam("unique_machine_id", platformId);
+		}
+
+		TiDatabaseHelper db = new TiDatabaseHelper(app);
+		String storedMachineId = db.getPlatformParam("unique_machine_id", "");
+		String hardwareMachineId = db.getPlatformParam("hardware_machine_id", "");
+
+		// which is the value we need to be concerned with?
+		String currentMachineId;
+		if (platformId != hardwareMachineId) {
+			currentMachineId = platformId;
+		} else {
+			currentMachineId = storedMachineId;
+		}
+
+		// is the value in question valid?
+		String[] badIds = {"9774d56d682e549c", "1234567890ABCDEF"};
+
+		// load in the bad ids from tiapp.xml and insert into badIds array
+
+		for (int i = 0; i < badIds.length; i++) {
+			if (currentMachineId.equals(badIds [i])) {
+				Log.e(LCAT, "renaming ID");
+				currentMachineId = createUUID();
+				break;
 			}
+		}
+
+		// set the new value
+		if (currentMachineId != storedMachineId) {
+			db.updatePlatformParam("unique_machine_id", currentMachineId);
+			db.updatePlatformParam("hardware_machine_id", platformId);
+			db.updatePlatformParam("previous_machine_id", storedMachineId);
+			platformId = currentMachineId;
 		}
 
 		sessionId = createUUID();
 	}
+	
+	public static synchronized void intializeDisplayMetrics(Activity activity) 
+	{	
+		if (!applicationDisplayInfoInitialized) {
+ 			DisplayMetrics dm = new DisplayMetrics();
+			activity.getWindowManager().getDefaultDisplay().getMetrics(dm);
+	
+			// Note: this isn't public API, so there should be lots of error checking here
+			try {
+				Method gciMethod = Resources.class.getMethod("getCompatibilityInfo");
+				Object compatInfo = gciMethod.invoke(activity.getResources());
+				applicationScaleFactor = (Float)compatInfo.getClass().getField("applicationScale").get(compatInfo);
+			} catch (Exception e) {
+				Log.w(LCAT, "Unable to get application scale factor, using reported density and it's factor");
+			}
+	
+			if (applicationScaleFactor == 1.0f) {
+				applicationLogicalDensity = dm.densityDpi;
+			} else if (applicationScaleFactor > 1.0f) {
+				applicationLogicalDensity = DisplayMetrics.DENSITY_MEDIUM;
+			} else {
+				applicationLogicalDensity = DisplayMetrics.DENSITY_LOW;
+			}
+			
+			applicationDisplayInfoInitialized = true;
+		}
+	}
 
 	public static ITiAppInfo getAppInfo() {
-		return tiApp.getAppInfo();
+		return TiApplication.getInstance().getAppInfo();
 	}
 
 	public static String getName() {
@@ -100,7 +172,94 @@ public class TiPlatformHelper
 	}
 
 	public static String getLocale() {
-		return Locale.getDefault().getLanguage();
+		return Locale.getDefault().toString().replace("_", "-");
+	}
+	
+	public static Locale getLocale(String localeCode)
+    {
+		if (localeCode == null) { return null; }
+		String code = localeCode.replace('-', '_');
+    	if (locales.containsKey(code)) {
+    		return locales.get(code);
+    	}
+    	
+    	String language = "", country = "", variant = "";
+    	if (code.startsWith("__")) {
+    		// This is weird, just a variant.  Whatever, give it a shot.
+    		StringTokenizer tokens = new StringTokenizer(code, "__");
+    		if (tokens.hasMoreElements()) {
+    			variant = tokens.nextToken();
+    		}
+    	} else if (code.startsWith("_")) {
+    		// No language specified, but country specified and maybe variant.
+    		StringTokenizer tokens = new StringTokenizer(code, "_");
+        	if (tokens.hasMoreElements()) {
+        		country = tokens.nextToken();
+        	}
+        	if (tokens.hasMoreElements()) {
+        		variant = tokens.nextToken();
+        	}
+    	} else if (code.contains("__")) {
+    		// this is language__variant
+    		StringTokenizer tokens = new StringTokenizer(code, "__");
+    		if (tokens.hasMoreElements()) {
+    			language = tokens.nextToken();
+    		}
+    		if (tokens.hasMoreElements()) {
+    			variant = tokens.nextToken();
+    		}
+    	} else {
+    		StringTokenizer tokens = new StringTokenizer(code, "__");
+    		if (tokens.hasMoreElements()) {
+    			language = tokens.nextToken();
+    		}
+    		if (tokens.hasMoreElements()) {
+    			country = tokens.nextToken();
+    		}
+    		if (tokens.hasMoreElements()) {
+    			variant = tokens.nextToken();
+    		}
+    	}
+    	
+    	Locale l = new Locale(language, country, variant);
+    	locales.put(code, l);
+    	return l;
+    }
+	
+	public static String getCurrencyCode(Locale locale)
+	{
+		String code;
+		if (currencyCodes.containsKey(locale)) {
+			code = currencyCodes.get(locale);
+		} else {
+			code = Currency.getInstance(locale).getCurrencyCode();
+			currencyCodes.put(locale, code);
+		}
+		return code;
+	}
+	
+	public static String getCurrencySymbol(Locale locale)
+	{
+		String symbol;
+		if (currencySymbols.containsKey(locale)) {
+			symbol = currencySymbols.get(locale);
+		} else {
+			symbol = Currency.getInstance(locale).getSymbol(locale);
+			currencySymbols.put(locale, symbol);
+		}
+		return symbol;
+	}
+	
+	public static String getCurrencySymbol(String currencyCode) 
+	{
+		String symbol;
+		if (currencySymbolsByCode.containsKey(currencyCode)) {
+			symbol = currencySymbolsByCode.get(currencyCode);
+		} else {
+			symbol = Currency.getInstance(currencyCode).getSymbol();
+			currencySymbolsByCode.put(currencyCode, symbol);
+		}
+		return symbol;
 	}
 
 	public static String createEventId() {
@@ -140,6 +299,7 @@ public class TiPlatformHelper
 
 	public static String getMacaddress() {
 		String macaddr = null;
+		TiApplication tiApp = TiApplication.getInstance();
 
 		if(tiApp.getRootActivity().checkCallingOrSelfPermission(Manifest.permission.ACCESS_WIFI_STATE) == PackageManager.PERMISSION_GRANTED) {
 			WifiManager wm = (WifiManager) tiApp.getRootActivity().getSystemService(Context.WIFI_SERVICE);
@@ -190,6 +350,58 @@ public class TiPlatformHelper
 		return macaddr;
 	}
 
+	public static String getIpAddress() {
+		String ipAddress = null;
+		TiApplication tiApp = TiApplication.getInstance();
+
+		if(tiApp.getRootActivity().checkCallingOrSelfPermission(Manifest.permission.ACCESS_WIFI_STATE) == PackageManager.PERMISSION_GRANTED) {
+			WifiManager wifiManager = (WifiManager) tiApp.getRootActivity().getSystemService(Context.WIFI_SERVICE);
+			if (wifiManager != null) {
+				WifiInfo wifiInfo = wifiManager.getConnectionInfo();
+				if (wifiInfo != null) {
+					ipAddress = Formatter.formatIpAddress(wifiInfo.getIpAddress());
+					if (DBG) {
+						Log.d(LCAT, "Found IP address: " + ipAddress);
+					}
+				} else {
+					Log.e(LCAT, "Unable to access WifiInfo, failed to get IP address");
+				}
+			} else {
+				Log.e(LCAT, "Unable to access the WifiManager, failed to get IP address");
+			}
+		} else {
+			Log.e(LCAT, "Must have android.permission.ACCESS_WIFI_STATE, failed to get IP address");
+		}
+
+		return ipAddress;
+	}
+
+	public static String getNetmask() {
+		String netmask = null;
+		TiApplication tiApp = TiApplication.getInstance();
+
+		if(tiApp.getRootActivity().checkCallingOrSelfPermission(Manifest.permission.ACCESS_WIFI_STATE) == PackageManager.PERMISSION_GRANTED) {
+			WifiManager wifiManager = (WifiManager) tiApp.getRootActivity().getSystemService(Context.WIFI_SERVICE);
+			if (wifiManager != null) {
+				DhcpInfo dhcpInfo = wifiManager.getDhcpInfo();
+				if(dhcpInfo != null) {
+					netmask = Formatter.formatIpAddress(dhcpInfo.netmask);
+					if (DBG) {
+						Log.d(LCAT, "Found netmask: " + netmask);
+					}
+				} else {
+					Log.e(LCAT, "Unable to access DhcpInfo, failed to get netmask");
+				}
+			} else {
+				Log.e(LCAT, "Unable to access the WifiManager, failed to get netmask");
+			}
+		} else {
+			Log.e(LCAT, "Must have android.permission.ACCESS_WIFI_STATE, failed to get netmask");
+		}
+
+		return netmask;
+	}
+	
 	public static String getNetworkTypeName() {
 		return networkTypeToTypeName(getNetworkType());
 	}
@@ -197,7 +409,8 @@ public class TiPlatformHelper
 	private static int getNetworkType() {
 		int type = -1;
 
-		ConnectivityManager connectivityManager = (ConnectivityManager) tiApp.getSystemService(Context.CONNECTIVITY_SERVICE);
+		ConnectivityManager connectivityManager = (ConnectivityManager)
+			TiApplication.getInstance().getSystemService(Context.CONNECTIVITY_SERVICE);
 		if (connectivityManager != null) {
 			try {
 				NetworkInfo ni = connectivityManager.getActiveNetworkInfo();

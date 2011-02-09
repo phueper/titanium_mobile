@@ -23,21 +23,24 @@
 }
 
 
--(void)childAdded:(id)child
+-(void)contentsWillChange
 {
 	if ([self viewAttached])
 	{
 		[(TiUIScrollView *)[self view] setNeedsHandleContentSize];
 	}
+	[super contentsWillChange];
 }
 
--(void)childRemoved:(id)child
+-(void)willChangeSize
 {
 	if ([self viewAttached])
 	{
-		[(TiUIScrollView *)[self view] setNeedsHandleContentSize];
+		[(TiUIScrollView *)[self view] setNeedsHandleContentSizeIfAutosizing];
 	}
+	[super willChangeSize];
 }
+
 
 -(void)layoutChildren:(BOOL)optimize
 {
@@ -50,11 +53,6 @@
 	{
 		[super layoutChildren:optimize];
 	}
-}
-
--(BOOL)willBeRelaying
-{
-	return [super willBeRelaying];
 }
 
 -(void)childWillResize:(TiViewProxy *)child
@@ -79,6 +77,13 @@
 	[offset release];
 }
 
+- (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView_               // scrolling has ended
+{
+	if ([self _hasListeners:@"scrollEnd"])
+	{
+		[self fireEvent:@"scrollEnd" withObject:nil];
+	}
+}
 
 -(void)scrollViewDidScroll:(UIScrollView *)scrollView
 {

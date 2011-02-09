@@ -33,6 +33,11 @@
 	[super _destroy];
 }
 
+-(NSMutableDictionary*)langConversionTable
+{
+    return [NSMutableDictionary dictionaryWithObject:@"title" forKey:@"titleid"];
+}
+
 -(void)_configure
 {
 	// since we're special proxy type instead of normal, we force in values
@@ -115,7 +120,7 @@
 	}
 	
 	[newWindow _tabFocus];
-	WARN_IF_BACKGROUND_THREAD;
+	WARN_IF_BACKGROUND_THREAD_OBJ;
 	[self childOrientationControllerChangedFlags:newWindow];
 
 	opening = NO; 
@@ -189,19 +194,23 @@
 
 -(void)open:(NSArray*)args
 {
-	[self performSelectorOnMainThread:@selector(openOnUIThread:) withObject:args waitUntilDone:YES];
-}
-
--(void)openOnUIThread:(NSArray*)args
-{
 	TiWindowProxy *window = [args objectAtIndex:0];
 	ENSURE_TYPE(window,TiWindowProxy);
 	// since the didShow notification above happens on both a push and pop, i need to keep a flag
 	// to let me know which state i'm in so i only close the current window on a pop
 	opening = YES;
+	[window setParentOrientationController:self];
+	// TODO: Slap patch.  Views, when opening/added, should check parent visibility (and parent/parent visibility, if possible)
+	[window parentWillShow];
+
+	[self performSelectorOnMainThread:@selector(openOnUIThread:) withObject:args waitUntilDone:NO];
+}
+
+-(void)openOnUIThread:(NSArray*)args
+{
+	TiWindowProxy *window = [args objectAtIndex:0];
 	BOOL animated = args!=nil && [args count] > 1 ? [TiUtils boolValue:@"animated" properties:[args objectAtIndex:1] def:YES] : YES;
 	TiUITabController *root = [[TiUITabController alloc] initWithProxy:window tab:self];
-	[window setParentOrientationController:self];
 
 	[self controller];
 	[[rootController navigationController] pushViewController:root animated:animated];
@@ -322,11 +331,11 @@
 	{
 		// we might be inside a different context than our tab group and if so, he takes precendence in
 		// url resolution
-		TiProxy* currentWindow = [self.executionContext preloadForKey:@"currentWindow"];
+		TiProxy* currentWindow = [self.executionContext preloadForKey:@"currentWindow" name:@"UI"];
 		if (currentWindow==nil)
 		{
 			// check our current window's context that we are owned by
-			currentWindow = [self.pageContext preloadForKey:@"currentWindow"];
+			currentWindow = [self.pageContext preloadForKey:@"currentWindow" name:@"UI"];
 		}
 		if (currentWindow==nil)
 		{
@@ -367,11 +376,11 @@
 	{
 		// we might be inside a different context than our tab group and if so, he takes precendence in
 		// url resolution
-		TiProxy* currentWindow = [self.executionContext preloadForKey:@"currentWindow"];
+		TiProxy* currentWindow = [self.executionContext preloadForKey:@"currentWindow" name:@"UI"];
 		if (currentWindow==nil)
 		{
 			// check our current window's context that we are owned by
-			currentWindow = [self.pageContext preloadForKey:@"currentWindow"];
+			currentWindow = [self.pageContext preloadForKey:@"currentWindow" name:@"UI"];
 		}
 		if (currentWindow==nil)
 		{
@@ -435,6 +444,22 @@
 //	[super viewDidDisappear:animated];
 }
 
+-(void)willChangeSize
+{
+	[super willChangeSize];
+	
+	//TODO: Shouldn't this be not through UI? Shouldn't we retain the windows ourselves?
+	for (UIViewController * thisController in [controller viewControllers])
+	{
+		if ([thisController isKindOfClass:[TiViewController class]])
+		{
+			TiViewProxy * thisProxy = [(TiViewController *)thisController proxy];
+			[thisProxy willChangeSize];
+		}
+	}
+}
+
+
 @synthesize parentOrientationController;
 
 -(TiOrientationFlags)orientationFlags
@@ -451,7 +476,7 @@
 		{
 			continue;
 		}
-		TiWindowProxy * thisProxy = [(TiViewController *)thisController proxy];
+		TiWindowProxy * thisProxy = (TiWindowProxy *)[(TiViewController *)thisController proxy];
 		if ([thisProxy conformsToProtocol:@protocol(TiOrientationController)])
 		{
 			TiOrientationFlags result = [thisProxy orientationFlags];
@@ -466,7 +491,7 @@
 
 -(void)childOrientationControllerChangedFlags:(id<TiOrientationController>) orientationController
 {
-	WARN_IF_BACKGROUND_THREAD;
+	WARN_IF_BACKGROUND_THREAD_OBJ;
 	[parentOrientationController childOrientationControllerChangedFlags:self];
 }
 

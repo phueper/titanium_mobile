@@ -142,7 +142,12 @@ extern BOOL const TI_APPLICATION_ANALYTICS;
 	NSError * error = nil;
 	id event = [json fragmentWithString:locationString error:&error];
 	[json release];
-	[context fireEvent:callback withObject:event remove:NO thisObject:nil];
+	if (error != nil) {
+		[self requestError:[error localizedDescription]];
+	}
+	else {
+		[context fireEvent:callback withObject:event remove:NO thisObject:nil];
+	}
 }
 
 @end
@@ -153,18 +158,33 @@ extern BOOL const TI_APPLICATION_ANALYTICS;
 
 #pragma mark Internal
 
+// TODO: Do we need to force this onto the main thread?
+-(void)shutdownLocationManager
+{
+	[lock lock];
+	if (locationManager == nil) {
+		[lock unlock];
+		return;
+	}
+	
+	if (trackingHeading) {
+		[locationManager stopUpdatingHeading];
+	}
+	if (trackingLocation) {
+		[locationManager stopUpdatingLocation];
+	}
+	RELEASE_TO_NIL_AUTORELEASE(locationManager);
+	[lock unlock];
+}
+
 -(void)_destroy
 {
-	if (locationManager!=nil)
-	{
-		[locationManager stopUpdatingHeading];
-		[locationManager stopUpdatingLocation];
-		locationManager.delegate = nil;
-	}
-	RELEASE_TO_NIL(locationManager);
+	[self shutdownLocationManager];
+	RELEASE_TO_NIL(tempManager);
 	RELEASE_TO_NIL(singleHeading);
 	RELEASE_TO_NIL(singleLocation);
 	RELEASE_TO_NIL(purpose);
+	RELEASE_TO_NIL(lock);
 	[super _destroy];
 }
 
@@ -220,13 +240,17 @@ extern BOOL const TI_APPLICATION_ANALYTICS;
 	// should we show heading calibration dialog? defaults to YES
 	calibration = YES; 
 	
+	lock = [[NSRecursiveLock alloc] init];
+	
 	[super _configure]; 
 }
 
 -(CLLocationManager*)locationManager
 {
+	[lock lock];
 	if (locationManager==nil)
 	{
+		RELEASE_TO_NIL(tempManager);
 		locationManager = [[CLLocationManager alloc] init];
 		locationManager.delegate = self;
 		if (accuracy!=-1)
@@ -263,6 +287,7 @@ extern BOOL const TI_APPLICATION_ANALYTICS;
 			[servicesDisabledAlert release];
 		}
 	}
+	[lock unlock];
 	return locationManager;
 }
 
@@ -275,7 +300,11 @@ extern BOOL const TI_APPLICATION_ANALYTICS;
 		// if we have an instance, just use it
 		return locationManager;
 	}
-	return [[[CLLocationManager alloc] init] autorelease];
+	
+	if (tempManager == nil) {
+		tempManager = [[CLLocationManager alloc] init];
+	}
+	return tempManager;
 }
 
 -(void)startStopLocationManagerIfNeeded
@@ -330,9 +359,7 @@ extern BOOL const TI_APPLICATION_ANALYTICS;
 		if ((startHeading==NO && startLocation==NO) ||
 			(trackingHeading==NO && trackingLocation==NO))
 		{
-			locationManager.delegate = nil; 
-			[locationManager autorelease];
-			locationManager = nil;
+			[self shutdownLocationManager];
 			trackingLocation = NO;
 			trackingHeading = NO;
 		}
@@ -384,14 +411,27 @@ extern BOOL const TI_APPLICATION_ANALYTICS;
 	if (check && ![self _hasListeners:@"heading"] && ![self _hasListeners:@"location"])
 	{
 		[self performSelectorOnMainThread:@selector(startStopLocationManagerIfNeeded) withObject:nil waitUntilDone:YES];
-		locationManager.delegate = nil;
-		[locationManager autorelease];
-		locationManager = nil; 
+		[self shutdownLocationManager];
 		trackingLocation = NO;
 		trackingHeading = NO;
 		RELEASE_TO_NIL(singleHeading);
 		RELEASE_TO_NIL(singleLocation);
 	}
+}
+
+-(BOOL)headingAvailable
+{
+	if ([TiUtils isIOS4OrGreater]) {
+		return [CLLocationManager headingAvailable];
+	}
+	else {
+		CLLocationManager* tempManager_ = [self tempLocationManager];
+		if ([tempManager_ respondsToSelector:@selector(headingAvailable)]) {
+			return [tempManager_ headingAvailable];
+		}
+	}
+	
+	return NO;
 }
 
 #pragma mark Public APIs
@@ -401,8 +441,8 @@ extern BOOL const TI_APPLICATION_ANALYTICS;
 	UIDevice * theDevice = [UIDevice currentDevice];
 	NSString* version = [theDevice systemVersion];
 	
-	BOOL headingAvailableBool = NO;
-	if ([[self tempLocationManager] respondsToSelector:@selector(headingAvailable)])
+	BOOL headingAvailableBool = [self headingAvailable];
+	if (headingAvailableBool)
 	{
 		struct utsname u;
 		uname(&u);
@@ -410,11 +450,7 @@ extern BOOL const TI_APPLICATION_ANALYTICS;
 		{
 			// 3.0 simulator headingAvailable will report YES but its not really available except post 3.0
 			headingAvailableBool = [version hasPrefix:@"3.0"] ? NO : [[self tempLocationManager] headingAvailable];
-		}
-		else 
-		{
-			headingAvailableBool = [[self tempLocationManager] headingAvailable];
-		}		
+		}	
 	}
 	return NUMBOOL(headingAvailableBool);
 }
@@ -558,7 +594,32 @@ extern BOOL const TI_APPLICATION_ANALYTICS;
 
 -(NSNumber*)locationServicesEnabled
 {
+	if ([TiUtils isIOS4OrGreater]) {
+		return NUMBOOL([CLLocationManager locationServicesEnabled]);
+	}
+	
 	return NUMBOOL([[self tempLocationManager] locationServicesEnabled]);
+}
+
+-(NSNumber*)locationServicesAuthorization
+{
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_4_2
+	if ([TiUtils isIOS4_2OrGreater]) {
+		return NUMINT([CLLocationManager authorizationStatus]);
+	}
+#endif
+	return [self AUTHORIZATION_UNKNOWN];
+}
+
+-(void)restart:(id)arg
+{
+	[lock lock];
+	[self shutdownLocationManager];
+	trackingHeading = NO;
+	trackingLocation = NO;
+	[lock unlock];
+	// must be on UI thread
+	[self performSelectorOnMainThread:@selector(startStopLocationManagerIfNeeded) withObject:nil waitUntilDone:NO];
 }
 
 MAKE_SYSTEM_PROP_DBL(ACCURACY_BEST,kCLLocationAccuracyBest);
@@ -566,7 +627,27 @@ MAKE_SYSTEM_PROP_DBL(ACCURACY_NEAREST_TEN_METERS,kCLLocationAccuracyNearestTenMe
 MAKE_SYSTEM_PROP_DBL(ACCURACY_HUNDRED_METERS,kCLLocationAccuracyHundredMeters);
 MAKE_SYSTEM_PROP_DBL(ACCURACY_KILOMETER,kCLLocationAccuracyKilometer);
 MAKE_SYSTEM_PROP_DBL(ACCURACY_THREE_KILOMETERS,kCLLocationAccuracyThreeKilometers);
-	
+
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_4_2
+MAKE_SYSTEM_PROP(AUTHORIZATION_UNKNOWN, kCLAuthorizationStatusNotDetermined);
+MAKE_SYSTEM_PROP(AUTHORIZATION_AUTHORIZED, kCLAuthorizationStatusAuthorized);
+MAKE_SYSTEM_PROP(AUTHORIZATION_DENIED, kCLAuthorizationStatusDenied);
+MAKE_SYSTEM_PROP(AUTHORIZATION_RESTRICTED, kCLAuthorizationStatusRestricted);
+#else
+// We only need auth unknown, because that's all the system will return.
+MAKE_SYSTEM_PROP(AUTHORIZATION_UNKNOWN, 0);
+#endif
+
+MAKE_SYSTEM_PROP(ERROR_LOCATION_UNKNOWN, kCLErrorLocationUnknown);
+MAKE_SYSTEM_PROP(ERROR_DENIED, kCLErrorDenied);
+MAKE_SYSTEM_PROP(ERROR_NETWORK, kCLErrorNetwork);
+MAKE_SYSTEM_PROP(ERROR_HEADING_FAILURE, kCLErrorHeadingFailure);
+// iOS 4.0+ only
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_4_0
+MAKE_SYSTEM_PROP(ERROR_REGION_MONITORING_DENIED, kCLErrorRegionMonitoringDenied);
+MAKE_SYSTEM_PROP(ERROR_REGION_MONITORING_FAILURE, kCLErrorRegionMonitoringFailure);
+MAKE_SYSTEM_PROP(ERROR_REGION_MONITORING_DELAYED, kCLErrorRegionMonitoringSetupDelayed);
+#endif
 
 #pragma mark Internal
 
@@ -708,7 +789,8 @@ MAKE_SYSTEM_PROP_DBL(ACCURACY_THREE_KILOMETERS,kCLLocationAccuracyThreeKilometer
 
 - (void)locationManager:(CLLocationManager *)manager didFailWithError:(NSError *)error
 {
-	NSDictionary *event = [NSDictionary dictionaryWithObjectsAndKeys:[error description],@"error",
+	NSDictionary *event = [NSDictionary dictionaryWithObjectsAndKeys:[error localizedDescription],@"error",
+						   NUMINT([error code]), @"code",
 						   NUMBOOL(NO),@"success",nil];
 	
 	if ([self _hasListeners:@"location"])

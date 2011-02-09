@@ -50,6 +50,18 @@ enum
 
 #pragma mark Internal
 
+-(void)destroyPickerCallbacks
+{
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_4_0
+	RELEASE_TO_NIL(editorSuccessCallback);
+	RELEASE_TO_NIL(editorErrorCallback);
+	RELEASE_TO_NIL(editorCancelCallback);
+#endif
+	RELEASE_TO_NIL(pickerSuccessCallback);
+	RELEASE_TO_NIL(pickerErrorCallback);
+	RELEASE_TO_NIL(pickerCancelCallback);
+}
+
 -(void)destroyPicker
 {
 #if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_3_2
@@ -327,6 +339,46 @@ enum
 	[self displayModalPicker:picker settings:args];
 }
 
+-(void)saveCompletedForImage:(UIImage*)image error:(NSError*)error contextInfo:(void*)contextInfo
+{
+	NSDictionary* saveCallbacks = (NSDictionary*)contextInfo;
+	TiBlob* blob = [[[TiBlob alloc] initWithImage:image] autorelease];
+	
+	if (error != nil) {
+		KrollCallback* errorCallback = [saveCallbacks objectForKey:@"error"];
+		if (errorCallback != nil) {
+			NSDictionary* event = [NSDictionary dictionaryWithObjectsAndKeys:[error localizedDescription],@"error",blob,@"image",nil];
+			[NSThread detachNewThreadSelector:@selector(dispatchCallback:) toTarget:self withObject:[NSArray arrayWithObjects:@"error",event,errorCallback,nil]];
+		}
+		return;
+	}
+
+	KrollCallback* successCallback = [saveCallbacks objectForKey:@"success"];
+	if (successCallback != nil) {
+		NSDictionary* event = [NSDictionary dictionaryWithObject:blob forKey:@"image"];
+		[NSThread detachNewThreadSelector:@selector(dispatchCallback:) toTarget:self withObject:[NSArray arrayWithObjects:@"success",event,successCallback,nil]];
+	}
+}
+
+-(void)saveCompletedForVideo:(NSString*)path error:(NSError*)error contextInfo:(void*)contextInfo
+{
+	NSDictionary* saveCallbacks = (NSDictionary*)contextInfo;
+	if (error != nil) {
+		KrollCallback* errorCallback = [saveCallbacks objectForKey:@"error"];
+		if (errorCallback != nil) {
+			NSDictionary* event = [NSDictionary dictionaryWithObjectsAndKeys:[error localizedDescription],@"error",path,@"path",nil];
+			[NSThread detachNewThreadSelector:@selector(dispatchCallback:) toTarget:self withObject:[NSArray arrayWithObjects:@"error",event,errorCallback,nil]];			
+		}
+		return;
+	}
+	
+	KrollCallback* successCallback = [saveCallbacks objectForKey:@"success"];
+	if (successCallback != nil) {
+		NSDictionary* event = [NSDictionary dictionaryWithObject:path forKey:@"path"];
+		[NSThread detachNewThreadSelector:@selector(dispatchCallback:) toTarget:self withObject:[NSArray arrayWithObjects:@"success",event,successCallback,nil]];					
+	}
+}
+
 #pragma mark Public APIs
 
 MAKE_SYSTEM_PROP(UNKNOWN_ERROR,MediaModuleErrorUnknown);
@@ -519,7 +571,7 @@ MAKE_SYSTEM_PROP(VIDEO_FINISH_REASON_USER_EXITED,MPMovieFinishReasonUserExited);
 
 #define ONLY_IN_IOS4_OR_GREATER(method,retval) \
 if (![TiUtils isIOS4OrGreater]) { \
-	NSLog(@"" #method " only available in iOS 4 and later");\
+	NSLog(@"[WARN] " #method " only available in iOS 4 and later");\
 	return retval;\
 }
 
@@ -767,43 +819,64 @@ if (![TiUtils isIOS4OrGreater]) { \
 -(void)saveToPhotoGallery:(id)arg
 {
 	ENSURE_UI_THREAD(saveToPhotoGallery,arg);
-	ENSURE_SINGLE_ARG(arg,NSObject);
-	if ([arg isKindOfClass:[TiBlob class]])
+	NSObject* image = [arg objectAtIndex:0];
+	ENSURE_TYPE(image, NSObject)
+	
+	NSDictionary* saveCallbacks=nil;
+	if ([arg count] > 1) {
+		saveCallbacks = [arg objectAtIndex:1];
+		ENSURE_TYPE(saveCallbacks, NSDictionary);
+		KrollCallback* successCallback = [saveCallbacks valueForKey:@"success"];
+		ENSURE_TYPE_OR_NIL(successCallback, KrollCallback);
+		KrollCallback* errorCallback = [saveCallbacks valueForKey:@"error"];
+		ENSURE_TYPE_OR_NIL(errorCallback, KrollCallback);
+	}
+	
+	if ([image isKindOfClass:[TiBlob class]])
 	{
-		TiBlob *blob = (TiBlob*)arg;
+		TiBlob *blob = (TiBlob*)image;
 		NSString *mime = [blob mimeType];
 		
 		if (mime==nil || [mime hasPrefix:@"image/"])
 		{
 			UIImage * savedImage = [blob image];
 			if (savedImage == nil) return;
-			UIImageWriteToSavedPhotosAlbum(savedImage, nil, nil, NULL);
+			UIImageWriteToSavedPhotosAlbum(savedImage, self, @selector(saveCompletedForImage:error:contextInfo:), [saveCallbacks retain]);
 		}
 		else if ([mime hasPrefix:@"video/"])
 		{
 			NSString * tempFilePath = [blob path];
 			if (tempFilePath == nil) return;
-			UISaveVideoAtPathToSavedPhotosAlbum(tempFilePath, nil, nil, NULL);
+			UISaveVideoAtPathToSavedPhotosAlbum(tempFilePath, self, @selector(saveCompletedForVideo:error:contextInfo:), [saveCallbacks retain]);
 		}
 	}
-	else if ([arg isKindOfClass:[TiFile class]])
+	else if ([image isKindOfClass:[TiFile class]])
 	{
-		TiFile *file = (TiFile*)arg;
+		TiFile *file = (TiFile*)image;
 		NSString *mime = [Mimetypes mimeTypeForExtension:[file path]];
 		if (mime == nil || [mime hasPrefix:@"image/"])
 		{
 			NSData *data = [NSData dataWithContentsOfFile:[file path]];
 			UIImage *image = [[[UIImage alloc] initWithData:data] autorelease];
-			UIImageWriteToSavedPhotosAlbum(image, nil, nil, NULL);
+			UIImageWriteToSavedPhotosAlbum(image, self, @selector(saveCompletedForImage:error:contextInfo:), [saveCallbacks retain]);
 		}
 		else if ([mime hasPrefix:@"video/"])
 		{
-			UISaveVideoAtPathToSavedPhotosAlbum([file path], nil, nil, NULL);
+			UISaveVideoAtPathToSavedPhotosAlbum([file path], self, @selector(saveCompletedForVideo:error:contextInfo:), [saveCallbacks retain]);
 		}
 	}
 	else
 	{
-		[self throwException:@"invalid media type" subreason:[NSString stringWithFormat:@"expected either TiBlob or TiFile, was: %@",[arg class]] location:CODELOCATION];
+		KrollCallback* errorCallback = [saveCallbacks valueForKey:@"error"];
+		if (errorCallback != nil) {
+			NSDictionary* event = [NSDictionary dictionaryWithObject:[NSString stringWithFormat:@"invalid media type: Exepcted either TiBlob or TiFile, was: %@",[image class]]
+															  forKey:@"error"];
+			[self dispatchCallback:[NSArray arrayWithObjects:@"error",event,errorCallback,nil]];
+		} else {
+			[self throwException:@"invalid media type" 
+					   subreason:[NSString stringWithFormat:@"expected either TiBlob or TiFile, was: %@",[image class]] 
+						location:CODELOCATION];
+		}
 	}
 }
 
@@ -832,6 +905,8 @@ if (![TiUtils isIOS4OrGreater]) { \
 
 -(void)hideCamera:(id)args
 {
+	[self destroyPickerCallbacks];
+	//Hopefully, if we remove the callbacks before going to the main thread, we may reduce deadlock.
 	ENSURE_UI_THREAD(hideCamera,args);
 	if (picker!=nil)
 	{
@@ -871,12 +946,26 @@ if (![TiUtils isIOS4OrGreater]) { \
 		if (mediaList!=nil) {
 			if ([mediaList isKindOfClass:[NSArray class]]) {
 				for (NSNumber* type in mediaList) {
-					mediaTypes |= [type integerValue];
+					switch ([type integerValue]) {
+						case MPMediaTypeMusic:
+						case MPMediaTypeAnyAudio:
+						case MPMediaTypeAudioBook:
+						case MPMediaTypePodcast:
+						case MPMediaTypeAny:
+							mediaTypes |= [type integerValue];
+					}
 				}
 			}
 			else {
 				ENSURE_TYPE(mediaList, NSNumber);
-				mediaTypes = [mediaList integerValue];
+				switch ([mediaList integerValue]) {
+					case MPMediaTypeMusic:
+					case MPMediaTypeAnyAudio:
+					case MPMediaTypeAudioBook:
+					case MPMediaTypePodcast:
+					case MPMediaTypeAny:
+						mediaTypes = [mediaList integerValue];
+				}
 			}
 		}
 		
@@ -960,95 +1049,82 @@ if (![TiUtils isIOS4OrGreater]) { \
 		[self closeModalPicker:picker];
 	}
 	
-	NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
-	
-	TiBlob *media = nil;
-	TiBlob *media2 = nil;
-	
 	NSString *mediaType = [editingInfo objectForKey:UIImagePickerControllerMediaType];
 	if (mediaType==nil)
 	{
 		mediaType = (NSString*)kUTTypeImage; // default to in case older OS
 	}
-	
-	[dictionary setObject:mediaType forKey:@"mediaType"];
-	
-	BOOL imageWrittenToAlbum = NO;
-	BOOL isVideo = [mediaType isEqualToString:(NSString*)kUTTypeMovie];
-	
 	NSURL *mediaURL = [editingInfo objectForKey:UIImagePickerControllerMediaURL];
-	if (mediaURL!=nil)
+	NSValue * ourRectValue = [editingInfo objectForKey:UIImagePickerControllerCropRect];
+	
+	BOOL isVideo = [mediaType isEqualToString:(NSString*)kUTTypeMovie];
+	NSDictionary *cropRect = nil;
+	TiBlob *media = nil;
+	TiBlob *thumbnail = nil;
+
+	BOOL imageWrittenToAlbum = NO;
+	
+	if (isVideo)
 	{
-		// this is a video, get the path to the URL
 		media = [[[TiBlob alloc] initWithFile:[mediaURL path]] autorelease];
-		
-		if (isVideo)
-		{
-			[media setMimeType:@"video/mpeg" type:TiBlobTypeFile];
-		}
-		else 
-		{
-			[media setMimeType:@"image/jpeg" type:TiBlobTypeFile];
-		}
-		
+		[media setMimeType:@"video/mpeg" type:TiBlobTypeFile];
 		if (saveToRoll)
 		{
-			if (isVideo)
-			{
-				NSString *tempFilePath = [mediaURL absoluteString];
-				UISaveVideoAtPathToSavedPhotosAlbum(tempFilePath, nil, nil, NULL);
-			}
-			else 
+			NSString *tempFilePath = [mediaURL absoluteString];
+			UISaveVideoAtPathToSavedPhotosAlbum(tempFilePath, nil, nil, NULL);
+		}
+		UIImage *thumbnailImage = [editingInfo objectForKey:UIImagePickerControllerOriginalImage];
+		thumbnail = [[[TiBlob alloc] initWithImage:thumbnailImage] autorelease];
+	}
+	else
+	{
+		UIImage *editedImage = [editingInfo objectForKey:UIImagePickerControllerEditedImage];
+		if ((mediaURL!=nil) && (editedImage == nil))
+		{
+			// this is a video, get the path to the URL
+			media = [[[TiBlob alloc] initWithFile:[mediaURL path]] autorelease];
+			[media setMimeType:@"image/jpeg" type:TiBlobTypeFile];
+			
+			if (saveToRoll)
 			{
 				UIImage *image = [editingInfo objectForKey:UIImagePickerControllerOriginalImage];
 				UIImageWriteToSavedPhotosAlbum(image, nil, nil, NULL);
-				imageWrittenToAlbum = YES;
 			}
-			
 		}
-		
-		// this is the thumbnail of the video
-		if (isVideo)
+		else
 		{
-			UIImage *image = [editingInfo objectForKey:UIImagePickerControllerOriginalImage];
-			media2 = [[[TiBlob alloc] initWithImage:image] autorelease];
+			UIImage *image = (editedImage != nil)?editedImage:
+					[editingInfo objectForKey:UIImagePickerControllerOriginalImage];
+			media = [[[TiBlob alloc] initWithImage:image] autorelease];
+			if (saveToRoll)
+			{
+				UIImageWriteToSavedPhotosAlbum(image, nil, nil, NULL);
+			}
 		}
 	}
 	
-	if (media==nil)
-	{
-		UIImage *image = [editingInfo objectForKey:UIImagePickerControllerEditedImage];
-		if (image==nil)
-		{
-			image = [editingInfo objectForKey:UIImagePickerControllerOriginalImage];
-		}
-		media = [[[TiBlob alloc] initWithImage:image] autorelease];
-		if (saveToRoll && imageWrittenToAlbum==NO)
-		{
-			UIImageWriteToSavedPhotosAlbum(image, nil, nil, NULL);
-		}
-	}
-	
-	NSValue * ourRectValue = [editingInfo objectForKey:UIImagePickerControllerCropRect];
 	if (ourRectValue != nil)
 	{
 		CGRect ourRect = [ourRectValue CGRectValue];
-		[dictionary setObject:[NSDictionary dictionaryWithObjectsAndKeys:
+		cropRect = [NSDictionary dictionaryWithObjectsAndKeys:
 							   [NSNumber numberWithFloat:ourRect.origin.x],@"x",
 							   [NSNumber numberWithFloat:ourRect.origin.y],@"y",
 							   [NSNumber numberWithFloat:ourRect.size.width],@"width",
 							   [NSNumber numberWithFloat:ourRect.size.height],@"height",
-							   nil] forKey:@"cropRect"];
+							   nil];
 	}
-	
-	if (media!=nil)
+
+	NSMutableDictionary *dictionary = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+			mediaType,@"mediaType",media,@"media",nil];
+
+	if (thumbnail!=nil)
 	{
-		[dictionary setObject:media forKey:@"media"];
+		[dictionary setObject:thumbnail forKey:@"thumbnail"];
 	}
-	
-	if (media2!=nil)
+
+	if (cropRect != nil)
 	{
-		[dictionary setObject:media2 forKey:@"thumbnail"];
+		[dictionary setObject:cropRect forKey:@"cropRect"];
 	}
 	
 	[self sendPickerSuccess:dictionary];
@@ -1143,17 +1219,20 @@ if (![TiUtils isIOS4OrGreater]) { \
 {
 	if (count == 1 && [type isEqualToString:@"linechange"])
 	{
-		WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+		WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe
+		[[TiMediaAudioSession sharedSession] startAudioSession]; // Have to start a session to get a listener
 		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(audioRouteChanged:) name:kTiMediaAudioSessionRouteChange object:[TiMediaAudioSession sharedSession]];
 	}
 	else if (count == 1 && [type isEqualToString:@"volume"])
 	{
-		WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+		WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
+		[[TiMediaAudioSession sharedSession] startAudioSession]; // Have to start a session to get a listener		
 		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(audioVolumeChanged:) name:kTiMediaAudioSessionVolumeChange object:[TiMediaAudioSession sharedSession]];
 	}
 	else if (count == 1 && [type isEqualToString:@"recordinginput"])
 	{
-		WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+		WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
+		[[TiMediaAudioSession sharedSession] startAudioSession]; // Have to start a session to get a listener		
 		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(audioInputChanged:) name:kTiMediaAudioSessionInputChange object:[TiMediaAudioSession sharedSession]];
 	}
 }
@@ -1162,17 +1241,20 @@ if (![TiUtils isIOS4OrGreater]) { \
 {
 	if (count == 0 && [type isEqualToString:@"linechange"])
 	{
-		WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+		WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
+		[[TiMediaAudioSession sharedSession] stopAudioSession];
 		[[NSNotificationCenter defaultCenter] removeObserver:self name:kTiMediaAudioSessionRouteChange object:[TiMediaAudioSession sharedSession]];
 	}
 	else if (count == 0 && [type isEqualToString:@"volume"])
 	{
-		WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+		WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
+		[[TiMediaAudioSession sharedSession] stopAudioSession];		
 		[[NSNotificationCenter defaultCenter] removeObserver:self name:kTiMediaAudioSessionVolumeChange object:[TiMediaAudioSession sharedSession]];
 	}
 	else if (count == 0 && [type isEqualToString:@"recordinginput"]) 
 	{
-		WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+		WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
+		[[TiMediaAudioSession sharedSession] stopAudioSession];		
 		[[NSNotificationCenter defaultCenter] removeObserver:self name:kTiMediaAudioSessionInputChange object:[TiMediaAudioSession sharedSession]];
 	}
 }

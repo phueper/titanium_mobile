@@ -156,7 +156,7 @@ extern BOOL const TI_APPLICATION_ANALYTICS;
 #if KROLLBRIDGE_MEMORY_DEBUG==1
 		NSLog(@"INIT: %@",self);
 #endif
-		WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+		WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
 		[[NSNotificationCenter defaultCenter] addObserver:self
 												 selector:@selector(didReceiveMemoryWarning:)
 													 name:UIApplicationDidReceiveMemoryWarningNotification  
@@ -223,7 +223,7 @@ extern BOOL const TI_APPLICATION_ANALYTICS;
 	NSLog(@"DEALLOC: %@",self);
 #endif
 	
-	WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+	WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
 	[[NSNotificationCenter defaultCenter] removeObserver:self name:UIApplicationDidReceiveMemoryWarningNotification object:nil];
 	
 	[self removeProxies];
@@ -245,11 +245,15 @@ extern BOOL const TI_APPLICATION_ANALYTICS;
 	return context;
 }
 
-- (id)preloadForKey:(id)key
+- (id)preloadForKey:(id)key name:(id)name
 {
 	if (preload!=nil)
 	{
-		return [preload objectForKey:key];
+		NSDictionary* dict = [preload objectForKey:name];
+		if (dict!=nil)
+		{
+			return [dict objectForKey:key];
+		}
 	}
 	return nil;
 }
@@ -418,7 +422,7 @@ extern BOOL const TI_APPLICATION_ANALYTICS;
 		shutdownCondition = [condition retain];
 		shutdown = YES;
 		// fire a notification event to our listeners
-		WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+		WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
 		NSNotification *notification = [NSNotification notificationWithName:kTiContextShutdownNotification object:self];
 		[[NSNotificationCenter defaultCenter] postNotification:notification];
 		
@@ -442,6 +446,7 @@ extern BOOL const TI_APPLICATION_ANALYTICS;
 
 -(void)willStartNewContext:(KrollContext*)kroll
 {
+	[self retain]; // Hold onto ourselves as long as the context needs us
 }
 
 -(void)didStartNewContext:(KrollContext*)kroll
@@ -462,17 +467,20 @@ extern BOOL const TI_APPLICATION_ANALYTICS;
 	TiStringRelease(prop);
 	TiStringRelease(prop2);	
 	
-	//if we have a preload dictionary, register those static key/values into our UI namespace
-	//in the future we may support another top-level module but for now UI is only needed
+	//if we have a preload dictionary, register those static key/values into our namespace
 	if (preload!=nil)
 	{
-		KrollObject *ti = (KrollObject*)[titanium valueForKey:@"UI"];
-		for (id key in preload)
+		for (NSString *name in preload)
 		{
-			id target = [preload objectForKey:key];
-			KrollObject *ko = [[KrollObject alloc] initWithTarget:target context:context];
-			[ti setStaticValue:ko forKey:key purgable:NO];
-			[ko release];
+			KrollObject *ti = (KrollObject*)[titanium valueForKey:name];
+			NSDictionary *values = [preload valueForKey:name];
+			for (id key in values)
+			{
+				id target = [values objectForKey:key];
+				KrollObject *ko = [[KrollObject alloc] initWithTarget:target context:context];
+				[ti setStaticValue:ko forKey:key purgable:NO];
+				[ko release];
+			}
 		}
 		[self injectPatches];
 		[self evalFile:[url path] callback:self selector:@selector(booted)];	
@@ -492,7 +500,7 @@ extern BOOL const TI_APPLICATION_ANALYTICS;
 	{
 		shutdown = YES;
 		// fire a notification event to our listeners
-		WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+		WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
 		NSNotification *notification = [NSNotification notificationWithName:kTiContextShutdownNotification object:self];
 		[[NSNotificationCenter defaultCenter] postNotification:notification];
 	}
@@ -514,6 +522,7 @@ extern BOOL const TI_APPLICATION_ANALYTICS;
 	RELEASE_TO_NIL(context);
 	RELEASE_TO_NIL(preload);
 	RELEASE_TO_NIL(modules);
+	[self autorelease]; // Safe to release now that the context is done
 }
 
 - (void)registerProxy:(id)proxy 

@@ -5,7 +5,7 @@
 # the application on the device via iTunes
 # 
 
-import os, sys, uuid, subprocess, shutil, signal, string, traceback
+import os, sys, uuid, subprocess, shutil, signal, string, traceback, imp
 import platform, time, re, run, glob, codecs, hashlib, datetime, plistlib
 from compiler import Compiler
 from projector import Projector
@@ -13,20 +13,63 @@ from xml.dom.minidom import parseString
 from pbxproj import PBXProj
 from os.path import join, splitext, split, exists
 
+# the template_dir is the path where this file lives on disk
 template_dir = os.path.abspath(os.path.dirname(sys._getframe(0).f_code.co_filename))
+
+# add the parent and the common directory so we can load libraries from those paths too
 sys.path.append(os.path.join(template_dir,'../'))
+sys.path.append(os.path.join(template_dir,'../common'))
+sys.path.append(os.path.join(template_dir, '../module'))
 script_ok = False
 
 from tiapp import *
+from css import csscompiler
+import localecompiler
+from module import ModuleDetector
 
 ignoreFiles = ['.gitignore', '.cvsignore']
 ignoreDirs = ['.git','.svn', 'CVS']
+
+# need this so unicode works
+sys.stdout = codecs.getwriter('utf-8')(sys.stdout)
+
+def version_sort(a,b):
+	x = float(a[0:3]) # ignore more than 2 places
+	y = float(b[0:3]) # ignore more than 2 places
+	if x > y:
+		return -1
+	if x < y:
+		return 1
+	return 0
+
+# this will return the version of the iOS SDK that we have installed
+def check_iphone_sdk(s):
+	found = []
+	output = run.run(["xcodebuild","-showsdks"],True,False)
+	#print output
+	if output:
+		for line in output.split("\n"):
+			if line[0:1] == '\t':
+				line = line.strip()
+				i = line.find('-sdk')
+				if i < 0: continue
+				type = line[0:i]
+				cmd = line[i+5:]
+				if cmd.find("iphoneos")==0:
+					ver = cmd[8:]
+					found.append(ver)
+	# The sanity check doesn't have to be as thorough as prereq.
+	if s in found:
+		return s
+	# Sanity check failed. Let's find something close.
+	return sorted(found,version_sort)[0]
 
 def dequote(s):
 	if s[0:1] == '"':
 		return s[1:-1]
 	return s
 
+# force kill the simulator if running
 def kill_simulator():
 	run.run(['/usr/bin/killall',"iPhone Simulator"],True)
 
@@ -64,7 +107,7 @@ def read_project_version(f):
 			
 def infoplist_has_appid(f,appid):
 	if os.path.exists(f):
-		contents = open(f).read()
+		contents = codecs.open(f,encoding='utf-8').read()
 		return contents.find(appid)>0
 	return False
 		
@@ -90,6 +133,8 @@ def copy_module_resources(source, target, copy_all=False, force=False):
 				if os.path.exists(to_): os.remove(to_)
 				shutil.copyfile(from_, to_)
 
+# WARNING: This could be a time bomb waiting to happen, because it mangles
+# the app bundle name for NO REASON.  Or... does it?
 def make_app_name(s):
 	r = re.compile('[0-9a-zA-Z_]')
 	buf = ''
@@ -160,7 +205,7 @@ def dump_resources_listing(rootdir,out):
 	out.write("\n")
 
 def dump_infoplist(infoplist,out):
-	plist = open(infoplist).read()
+	plist = codecs.open(infoplist, encoding='utf-8').read()
 	out.write("Contents of Info.plist\n\n")
 	out.write(plist)
 	out.write("\n")
@@ -177,6 +222,12 @@ def read_provisioning_profile(f,o):
 	dict = dom.getElementsByTagName('dict')[0]
 	props = make_map(dict)
 	return props
+
+def get_aps_env(provisioning_profile):
+	entitlements = provisioning_profile['Entitlements']
+	if entitlements.has_key('aps-environment'):
+		return entitlements['aps-environment']
+	return None
 	
 def get_task_allow(provisioning_profile):
 	entitlements = provisioning_profile['Entitlements']
@@ -192,6 +243,7 @@ def get_profile_uuid(provisioning_profile):
 def generate_customized_entitlements(provisioning_profile,appid,uuid,command,out):
 	
 	get_task_value = get_task_allow(provisioning_profile)
+	aps_env = get_aps_env(provisioning_profile)
 	
 	buffer = """<?xml version="1.0" encoding="UTF-8"?> 	
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -211,6 +263,9 @@ def generate_customized_entitlements(provisioning_profile,appid,uuid,command,out
 	
 	buffer+="<key>get-task-allow</key>\n		<%s/>" % get_task_value
 	
+	if aps_env!=None:
+		buffer+="\n<key>aps-environment</key>\n		<string>%s</string>" % aps_env
+	
 	if command=='distribute':
 		buffer+="""
 		<key>keychain-access-groups</key>
@@ -224,7 +279,15 @@ def generate_customized_entitlements(provisioning_profile,appid,uuid,command,out
 </plist>"""
 	
 	return buffer
-	
+
+#
+# this script is invoked from our tooling but you can run from command line too if 
+# you know the arguments
+#
+# the current pattern is <command> [arguments]
+#
+# where the arguments are dependent on the command being passed
+#	
 def main(args):
 	global script_ok
 	argc = len(args)
@@ -248,12 +311,17 @@ def main(args):
 	
 	target = 'Debug'
 	deploytype = 'development'
-	devicefamily = None
+	devicefamily = 'iphone'
 	debug = False
 	simulator = False
 	xcode_build = False
 	force_xcode = False
-	
+	simtype = devicefamily
+
+	# when you run from xcode, we'll pass xcode as the command and the 
+	# xcode script will simply pass some additional args as well as xcode
+	# will add some additional useful stuff to the ENVIRONMENT and we pull
+	# those values out here
 	if command == 'xcode':
 		xcode_build = True
 		src_root = os.environ['SOURCE_ROOT']
@@ -271,6 +339,8 @@ def main(args):
 			devicefamily = 'iphone'
 		elif target_device == '2':
 			devicefamily = 'ipad'
+		elif target_device == '1,2':
+			devicefamily = 'universal'
 		if arch == 'i386': 
 			# simulator always indicates simulator
 			deploytype = 'development'
@@ -281,17 +351,20 @@ def main(args):
 				deploytype = 'test'
 			else:
 				# non-simulator + release build indicates package for distribution
-				deploytype = 'production' 
+				deploytype = 'production'
 		compiler = Compiler(project_dir,appid,name,deploytype,xcode_build,devicefamily,iphone_version)
 		script_ok = True
 		sys.exit(0)
 	else:
+		# the run command is when you run from titanium using the run command
+		# and it will run the project in the current directory immediately in the simulator
+		# from the command line
 		if command == 'run':
 			if argc < 3:
 				print "Usage: %s run <project_dir> [ios_version]" % os.path.basename(args[0])
 				sys.exit(1)
 			if argc == 3:
-				iphone_version = '4.0'
+				iphone_version = check_iphone_sdk('4.0')
 			else:
 				iphone_version = dequote(args[3].decode("utf-8"))
 			project_dir = os.path.expanduser(dequote(args[2].decode("utf-8")))
@@ -329,8 +402,11 @@ def main(args):
 			iphone_creator.create(iphone_dir,True)
 			sys.stdout.flush()
 			
-		
+		# we use different arguments dependent on the command
+		# pluck those out here
 		if command == 'distribute':
+			iphone_version = check_iphone_sdk(iphone_version)
+			link_version = iphone_version
 			appuuid = dequote(args[6].decode("utf-8"))
 			dist_name = dequote(args[7].decode("utf-8"))
 			output_dir = os.path.expanduser(dequote(args[8].decode("utf-8")))
@@ -338,6 +414,7 @@ def main(args):
 				devicefamily = dequote(args[9].decode("utf-8"))
 			deploytype = 'production'
 		elif command == 'simulator':
+			link_version = check_iphone_sdk(iphone_version)
 			deploytype = 'development'
 			debug = True
 			simulator = True
@@ -345,13 +422,21 @@ def main(args):
 			ostype = 'simulator'
 			if argc > 6:
 				devicefamily = dequote(args[6].decode("utf-8"))
+			if argc > 7:
+				simtype = dequote(args[7].decode("utf-8"))
+			else:
+				# 'universal' helpfully translates into iPhone here... just in case.
+				simtype = devicefamily
 		elif command == 'install':
+			iphone_version = check_iphone_sdk(iphone_version)
+			link_version = iphone_version
 			appuuid = dequote(args[6].decode("utf-8"))
 			dist_name = dequote(args[7].decode("utf-8"))
 			if argc > 8:
 				devicefamily = dequote(args[8].decode("utf-8"))
 			deploytype = 'test'
 		
+		# setup up the useful directories we need in the script
 		build_out_dir = os.path.abspath(os.path.join(iphone_dir,'build'))
 		build_dir = os.path.abspath(os.path.join(build_out_dir,'%s-iphone%s'%(target,ostype)))
 		app_dir = os.path.abspath(os.path.join(build_dir,name+'.app'))
@@ -364,12 +449,16 @@ def main(args):
 		githash = None
 		custom_fonts = []
 
+		# if we're not running in the simulator we want to clean out the build directory
 		if command!='simulator' and os.path.exists(build_out_dir):
 			shutil.rmtree(build_out_dir)
 		if not os.path.exists(build_out_dir): 
 			os.makedirs(build_out_dir)
 		# write out the build log, useful for debugging
-		o = open(os.path.join(build_out_dir,'build.log'),'w')
+		o = codecs.open(os.path.join(build_out_dir,'build.log'),'w',encoding='utf-8')
+		def log(msg):
+			print msg
+			o.write(msg)
 		try:
 			buildtime = datetime.datetime.now()
 			o.write("%s\n" % ("="*80))
@@ -392,7 +481,7 @@ def main(args):
 				
 			o.write("Script arguments:\n")
 			for arg in args:
-				o.write("   %s\n" % arg)
+				o.write(unicode("   %s\n" % arg, 'utf-8'))
 			o.write("\n")
 			o.write("Building from: %s\n" % template_dir)
 			o.write("Platform: %s\n\n" % platform.version())
@@ -407,87 +496,49 @@ def main(args):
 			# find the module directory relative to the root of the SDK	
 			titanium_dir = os.path.abspath(os.path.join(template_dir,'..','..','..','..'))
 			tp_module_dir = os.path.abspath(os.path.join(titanium_dir,'modules','iphone'))
-			tp_modules = []
-			tp_depends = []
-			
 			force_destroy_build = command!='simulator'
 
-			def find_depends(config,depends):
-				for line in open(config).readlines():
-					if line.find(':')!=-1:
-						(token,value)=line.split(':')
-						for entry in value.join(','):
-							entry = entry.strip()
-							try:
-								depends.index(entry)
-							except:
-								depends.append(entry)
-
-			# check to see if we have any uninstalled modules
-			# if we detect any zips, unzip them
-			if ti.properties.has_key('modules'):
-				cwd = os.getcwd()
-				os.chdir(titanium_dir)
-				for entry in glob.glob('%s/*.zip' % titanium_dir):
-					print "[INFO] installing module: %s" % entry
-					run.run(['/usr/bin/unzip','-o',entry])
-					os.remove(entry)
-				os.chdir(cwd)
-
-			tp_lib_search_path = []
-			tp_module_asset_dirs = []
+			detector = ModuleDetector(project_dir)
+			missing_modules, modules = detector.find_app_modules(ti, 'iphone')
+			module_lib_search_path = []
+			module_asset_dirs = []
 			
-			for module in ti.properties['modules']:
-				tp_name = module['name'].lower()
-				tp_version = module['version']
-				libname = 'lib%s.a' % tp_name
+			# search for modules that the project is using
+			# and make sure we add them to the compile
+			for module in modules:
+				module_id = module.manifest.moduleid.lower()
+				module_version = module.manifest.version
+				module_lib_name = 'lib%s.a' % module_id
 				# check first in the local project
-				local_tp = os.path.join(project_dir,'modules','iphone',libname)
+				local_module_lib = os.path.join(project_dir, 'modules', 'iphone', module_lib_name)
 				local = False
-				tp_dir = None
-				if os.path.exists(local_tp):
-					tp_modules.append(local_tp)
-					tp_lib_search_path.append([libname,local_tp])
-					local = True	
-					print "[INFO] Detected third-party module: %s" % (local_tp)
-					o.write("Detected third-party module: %s\n" % (local_tp))
+				if os.path.exists(local_module_lib):
+					module_lib_search_path.append([module_lib_name, local_module_lib])
+					local = True
+					log("[INFO] Detected third-party module: %s" % (local_module_lib))
 				else:
-					tp_dir = os.path.join(tp_module_dir,tp_name,tp_version)
-					if not os.path.exists(tp_dir):
-						print "[ERROR] Third-party module: %s/%s detected in tiapp.xml but not found at %s" % (tp_name,tp_version,tp_dir)
-						o.write("[ERROR] Third-party module: %s/%s detected in tiapp.xml but not found at %s\n" % (tp_name,tp_version,tp_dir))
+					if module.lib is None:
+						module_lib_path = module.get_resource(module_lib_name)
+						log("[ERROR] Third-party module: %s/%s missing library at %s" % (module_id, module_version, module_lib_path))
 						sys.exit(1)
-					tp_module = os.path.join(tp_dir,libname)
-					if not os.path.exists(tp_module):
-						print "[ERROR] Third-party module: %s/%s missing library at %s" % (tp_name,tp_version,tp_module)
-						o.write("[ERROR] Third-party module: %s/%s missing library at %s\n" % (tp_name,tp_version,tp_module))
-						sys.exit(1)
-					tp_config = os.path.join(tp_dir,'manifest')
-					if not os.path.exists(tp_config):
-						print "[ERROR] Third-party module: %s/%s missing manifest at %s" % (tp_name,tp_version,tp_config)
-						o.write("[ERROR] Third-party module: %s/%s missing manifest at %s\n" % (tp_name,tp_version,tp_config))
-						sys.exit(1)
-					find_depends(tp_config,tp_depends)	
-					tp_modules.append(tp_module)
-					tp_lib_search_path.append([libname,os.path.abspath(tp_module)])	
-					print "[INFO] Detected third-party module: %s/%s" % (tp_name,tp_version)
-					o.write("Detected third-party module: %s/%s\n" % (tp_name,tp_version))
+					module_lib_search_path.append([module_lib_name, os.path.abspath(module.lib)])
+					log("[INFO] Detected third-party module: %s/%s" % (module_id, module_version))
 				force_xcode = True
 
 				if not local:
 					# copy module resources
-					img_dir = os.path.join(tp_dir,'assets','images')
+					img_dir = module.get_resource('assets', 'images')
 					if os.path.exists(img_dir):
-						dest_img_dir = os.path.join(app_dir,'modules',tp_name,'images')
+						dest_img_dir = os.path.join(app_dir, 'modules', module_id, 'images')
 						if not os.path.exists(dest_img_dir):
 							os.makedirs(dest_img_dir)
-						tp_module_asset_dirs.append([img_dir,dest_img_dir])
+						module_asset_dirs.append([img_dir, dest_img_dir])
 
 					# copy in any module assets
-					tp_assets_dir = os.path.join(tp_dir,'assets')
-					if os.path.exists(tp_assets_dir): 
-						module_dir = os.path.join(app_dir,'modules',tp_name)
-						tp_module_asset_dirs.append([tp_assets_dir,module_dir])
+					module_assets_dir = module.get_resource('assets')
+					if os.path.exists(module_assets_dir): 
+						module_dir = os.path.join(app_dir, 'modules', module_id)
+						module_asset_dirs.append([module_assets_dir, module_dir])
 
 
 			print "[INFO] Titanium SDK version: %s" % sdk_version
@@ -495,6 +546,7 @@ def main(args):
 			print "[INFO] iPhone SDK version: %s" % iphone_version
 			
 			if simulator:
+				print "[INFO] iPhone simulated device: %s" % simtype
 				# during simulator we need to copy in standard built-in module files
 				# since we might not run the compiler on subsequent launches
 				for module_name in ('facebook','ui'):
@@ -502,13 +554,13 @@ def main(args):
 					dest_img_dir = os.path.join(app_dir,'modules',module_name,'images')
 					if not os.path.exists(dest_img_dir):
 						os.makedirs(dest_img_dir)
-					tp_module_asset_dirs.append([img_dir,dest_img_dir])
+					module_asset_dirs.append([img_dir,dest_img_dir])
 
 				# when in simulator since we point to the resources directory, we need
 				# to explicitly copy over any files
 				ird = os.path.join(project_dir,'Resources','iphone')
 				if os.path.exists(ird): 
-					tp_module_asset_dirs.append([ird,app_dir])
+					module_asset_dirs.append([ird,app_dir])
 				
 				for ext in ('ttf','otf'):
 					for f in glob.glob('%s/*.%s' % (os.path.join(project_dir,'Resources'),ext)):
@@ -522,16 +574,23 @@ def main(args):
 				ti.properties['version']=version
 				pp = os.path.expanduser("~/Library/MobileDevice/Provisioning Profiles/%s.mobileprovision" % appuuid)
 				provisioning_profile = read_provisioning_profile(pp,o)
-				
-				
+					
+# TODO:				
+# This code is used elsewhere, as well.  We should move stuff like this to
+# a common file.
 			def write_info_plist(infoplist_tmpl):
-				plist = open(infoplist_tmpl).read()
+				plist = codecs.open(infoplist_tmpl, encoding='utf-8').read()
 				plist = plist.replace('__PROJECT_NAME__',name)
 				plist = plist.replace('__PROJECT_ID__',appid)
 				plist = plist.replace('__URL__',appid)
 				urlscheme = name.replace('.','_').replace(' ','').lower()
 				plist = plist.replace('__URLSCHEME__',urlscheme)
-				pf = open(infoplist,'w')
+				if ti.has_app_property('ti.facebook.appid'):
+					fbid = ti.get_app_property('ti.facebook.appid')
+					plist = plist.replace('__ADDITIONAL_URL_SCHEMES__', '<string>fb%s</string>' % fbid)
+				else:
+					plist = plist.replace('__ADDITIONAL_URL_SCHEMES__','')
+				pf = codecs.open(infoplist,'w', encoding='utf-8')
 				pf.write(plist)
 				pf.close()			
 
@@ -557,6 +616,10 @@ def main(args):
 			lib_hash = None	
 			existing_git_hash = None
 
+			# this code simply tries and detect if we're building a different
+			# version of the project (or same version but built from different git hash)
+			# and if so, make sure we force rebuild so to propograte any code changes in
+			# source code (either upgrade or downgrade)
 			if os.path.exists(app_dir):
 				if os.path.exists(version_file):
 					line = open(version_file).read().strip()
@@ -584,6 +647,10 @@ def main(args):
 			if githash!=existing_git_hash:
 				force_rebuild = True
 
+			# we want to read the md5 of the libTiCore.a library since it must match
+			# the current one we're building and if not, we need to force a rebuild since
+			# that means we've copied in a different version of the library and we need
+			# to rebuild clean to avoid linking errors
 			source_lib=os.path.join(template_dir,'libTiCore.a')
 			fd = open(source_lib,'rb')
 			m = hashlib.md5()
@@ -597,6 +664,7 @@ def main(args):
 
 			lib_hash=new_lib_hash
 
+			# when we force rebuild, we need to re-compile and re-copy source, libs etc
 			if force_rebuild:
 				o.write("Performing full rebuild\n")
 				print "[INFO] Performing full rebuild. This will take a little bit. Hold tight..."
@@ -629,11 +697,11 @@ def main(args):
 
 			# write out any modules into the xcode project
 			# this must be done after project create above or this will be overriden
-			if len(tp_lib_search_path)>0:
+			if len(module_lib_search_path)>0:
 				proj = PBXProj()
 				xcode_proj = os.path.join(iphone_dir,'%s.xcodeproj'%name,'project.pbxproj')
 				current_xcode = open(xcode_proj).read()
-				for tp in tp_lib_search_path:
+				for tp in module_lib_search_path:
 					proj.add_static_library(tp[0],tp[1])
 				out = proj.parse(xcode_proj)
 				# since xcode changes can be destructive, only write as necessary (if changed)
@@ -673,7 +741,31 @@ def main(args):
 			if not os.path.exists(os.path.join(iphone_dir,'lib','libtiverify.a')):
 				shutil.copy(os.path.join(template_dir,'libtiverify.a'),os.path.join(iphone_dir,'lib','libtiverify.a'))
 
+			# compile JSS files
+			cssc = csscompiler.CSSCompiler(os.path.join(project_dir,'Resources'),devicefamily,appid)
+			app_stylesheet = os.path.join(iphone_dir,'Resources','stylesheet.plist')
+			asf = codecs.open(app_stylesheet,'w','utf-8')
+			asf.write(cssc.code)
+			asf.close()
 
+			if command=='simulator':
+				debug_sim_dir = os.path.join(iphone_dir,'build','Debug-iphonesimulator','%s.app' % name)
+				if os.path.exists(debug_sim_dir):
+					app_stylesheet = os.path.join(iphone_dir,'build','Debug-iphonesimulator','%s.app' % name,'stylesheet.plist')
+					asf = codecs.open(app_stylesheet,'w','utf-8')
+					asf.write(cssc.code)
+					asf.close()
+
+			if command!='simulator':
+				# compile plist into binary format so it's faster to load
+				# we can be slow on simulator
+				os.system("/usr/bin/plutil -convert binary1 \"%s\"" % app_stylesheet)
+			
+			o.write("Generated the following stylecode code:\n\n")
+			o.write(cssc.code)
+			o.write("\n")
+
+			# generate the Info.plist file with the appropriate device family
 			if devicefamily!=None:
 				applogo = ti.generate_infoplist(infoplist,appid,devicefamily,project_dir,iphone_version)
 			else:
@@ -682,10 +774,63 @@ def main(args):
 			# copy over the appicon
 			if applogo==None and ti.properties.has_key('icon'):
 				applogo = ti.properties['icon']
-
+				
+			# attempt to load any compiler plugins
+			if len(ti.properties['plugins']) > 0:
+				local_compiler_dir = os.path.abspath(os.path.join(project_dir,'plugins'))
+				tp_compiler_dir = os.path.abspath(os.path.join(titanium_dir,'plugins'))
+				if not os.path.exists(tp_compiler_dir) and not os.path.exists(local_compiler_dir):
+					o.write("+ Missing plugins directory at %s\n" % tp_compiler_dir)
+					print "[ERROR] Build Failed (Missing plugins directory). Please see output for more details"
+					sys.stdout.flush()
+					sys.exit(1)
+				compiler_config = {
+					'platform':'ios',
+					'devicefamily':devicefamily,
+					'simtype':simtype,
+					'tiapp':ti,
+					'project_dir':project_dir,
+					'titanium_dir':titanium_dir,
+					'appid':appid,
+					'iphone_version':iphone_version,
+					'template_dir':template_dir,
+					'project_name':name,
+					'command':command,
+					'deploytype':deploytype,
+					'build_dir':build_dir,
+					'app_name':app_name,
+					'app_dir':app_dir,
+					'iphone_dir':iphone_dir
+				}
+				for plugin in ti.properties['plugins']:
+					local_plugin_file = os.path.join(local_compiler_dir,plugin['name'],'plugin.py')
+					plugin_file = os.path.join(tp_compiler_dir,plugin['name'],plugin['version'],'plugin.py')
+					if not os.path.exists(local_plugin_file) and not os.path.exists(plugin_file):
+						o.write("+ Missing plugin at %s (checked %s also)\n" % (plugin_file,local_plugin_file))
+						print "[ERROR] Build Failed (Missing plugin for %s). Please see output for more details" % plugin['name']
+						sys.stdout.flush()
+						sys.exit(1)
+					o.write("+ Detected plugin: %s/%s\n" % (plugin['name'],plugin['version']))
+					print "[INFO] Detected compiler plugin: %s/%s" % (plugin['name'],plugin['version'])
+					code_path = plugin_file
+					if os.path.exists(local_plugin_file):	
+						code_path = local_plugin_file
+					o.write("+ Loading compiler plugin at %s\n" % code_path)
+					compiler_config['plugin']=plugin
+					fin = open(code_path, 'rb')
+					m = hashlib.md5()
+					m.update(open(code_path,'rb').read()) 
+					code_hash = m.hexdigest()
+					p = imp.load_source(code_hash, code_path, fin)
+					p.compile(compiler_config)
+					fin.close()
+					
 			try:		
 				os.chdir(iphone_dir)
 
+				# we always target backwards to 3.1 even when we use a later
+				# version iOS SDK. this ensures our code will run on old devices
+				# no matter which SDK we compile with
 				deploy_target = "IPHONEOS_DEPLOYMENT_TARGET=3.1"
 				device_target = 'TARGETED_DEVICE_FAMILY=1'  # this is non-sensical, but you can't pass empty string
 
@@ -697,10 +842,14 @@ def main(args):
 						shutil.rmtree(app_dir)
 
 				if not os.path.exists(app_dir): os.makedirs(app_dir)
+
+				# compile localization files
+				# Using app_name here will cause the locale to be put in the WRONG bundle!!
+				localecompiler.LocaleCompiler(name,project_dir,devicefamily,command).compile()
 				
 				# copy any module resources
-				if len(tp_module_asset_dirs)>0:
-					for e in tp_module_asset_dirs:
+				if len(module_asset_dirs)>0:
+					for e in module_asset_dirs:
 						copy_module_resources(e[0],e[1],True)
 				
 				# copy any custom fonts in (only runs in simulator)
@@ -731,20 +880,29 @@ def main(args):
 				extra_args = None
 
 				if devicefamily!=None:
-					if devicefamily == 'ipad':
+					# Meet the minimum requirements for ipad when necessary
+					if devicefamily == 'ipad' or devicefamily == 'universal':
 						device_target="TARGETED_DEVICE_FAMILY=2"
-						deploy_target = "IPHONEOS_DEPLOYMENT_TARGET=3.2"
+						# iPad requires at a minimum 3.2 (not 3.1 default)
+						if devicefamily == 'ipad':
+							deploy_target = "IPHONEOS_DEPLOYMENT_TARGET=3.2"
 						# NOTE: this is very important to run on device -- i dunno why
 						# xcode warns that 3.2 needs only armv7, but if we don't pass in 
 						# armv6 we get crashes on device
 						extra_args = ["VALID_ARCHS=armv6 armv7 i386"]
+					# Additionally, if we're universal, change the device family target
+					if devicefamily == 'universal':
+						device_target="TARGETED_DEVICE_FAMILY=1,2"
 
 				def execute_xcode(sdk,extras,print_output=True):
 
 					config = name
 					if devicefamily=='ipad':
 						config = "%s-iPad" % config
+					if devicefamily=='universal':
+						config = "%s-universal" % config
 
+					# these are the arguments for running a command line xcode build
 					args = ["xcodebuild","-target",config,"-configuration",target,"-sdk",sdk]
 					if extras!=None and len(extras)>0: 
 						args += extras
@@ -770,7 +928,8 @@ def main(args):
 						print "[END_VERBOSE]"
 						sys.stdout.flush()
 
-					o.write(output)
+					# Output already written by run.run
+					#o.write(output)
 
 					# check to make sure the user doesn't have a custom build location 
 					# configured in Xcode which currently causes issues with titanium
@@ -837,10 +996,11 @@ def main(args):
 					f.write("%s,%s,%s,%s" % (template_dir,log_id,lib_hash,githash))
 					f.close()
 
+				# this is a simulator build
 				if command == 'simulator':
 
 					if force_rebuild or force_xcode or not os.path.exists(binary):
-						execute_xcode("iphonesimulator%s" % iphone_version,["GCC_PREPROCESSOR_DEFINITIONS=__LOG__ID__=%s DEPLOYTYPE=development TI_DEVELOPMENT=1 DEBUG=1 TI_VERSION=%s" % (log_id,sdk_version)],False)
+						execute_xcode("iphonesimulator%s" % link_version,["GCC_PREPROCESSOR_DEFINITIONS=__LOG__ID__=%s DEPLOYTYPE=development TI_DEVELOPMENT=1 DEBUG=1 TI_VERSION=%s" % (log_id,sdk_version)],False)
 
 					# first make sure it's not running
 					kill_simulator()
@@ -881,6 +1041,8 @@ def main(args):
 
 					sim = None
 
+					# this handler will simply catch when the simulator exits
+					# so we can exit this script
 					def handler(signum, frame):
 						global script_ok
 						print "[INFO] Simulator is exiting"
@@ -900,6 +1062,8 @@ def main(args):
 						script_ok = True
 						sys.exit(0)
 
+					# make sure we're going to stop this script whenever 
+					# the simulator exits
 					signal.signal(signal.SIGHUP, handler)
 					signal.signal(signal.SIGINT, handler)
 					signal.signal(signal.SIGQUIT, handler)
@@ -915,11 +1079,13 @@ def main(args):
 					if devicefamily==None:
 						sim = subprocess.Popen("\"%s\" launch \"%s\" %s iphone" % (iphonesim,app_dir,iphone_version),shell=True)
 					else:
-						sim = subprocess.Popen("\"%s\" launch \"%s\" %s %s" % (iphonesim,app_dir,iphone_version,devicefamily),shell=True)
+						sim = subprocess.Popen("\"%s\" launch \"%s\" %s %s" % (iphonesim,app_dir,iphone_version,simtype),shell=True)
 
-					# activate the simulator window
+					# activate the simulator window - we use a OSA script to 
+					# cause the simulator window to come into the foreground (otherwise
+					# it will be behind Titanium Developer window)
 					ass = os.path.join(template_dir,'iphone_sim_activate.scpt')
-					cmd = "osascript \"%s\"" % ass
+					cmd = "osascript \"%s\" 2>/dev/null" % ass
 					os.system(cmd)
 
 					end_time = time.time()-start_time
@@ -934,21 +1100,29 @@ def main(args):
 
 					logger = os.path.realpath(os.path.join(template_dir,'logger.py'))
 
-					# start the logger
+					# start the logger tail process. this will simply read the output
+					# from the logs and stream them back to Titanium Developer on the console
 					log = subprocess.Popen([
 					  	logger,
 						str(log_id)+'.log',
 						iphone_version
 					])	
 
-					os.waitpid(sim.pid,0)
+					# wait (blocking this script) until the simulator exits	
+					try:
+						os.waitpid(sim.pid,0)
+					except SystemExit:
+						# If the user terminates the app here, it's via a
+						# soft kill of some kind (i.e. like what TiDev does)
+						# and so we should suppress the usual error message.
+						# Fixes #2086
+						pass
 
 					print "[INFO] Application has exited from Simulator"
 
 					# in this case, the user has exited the simulator itself
 					# and not clicked Stop Emulator from within Developer so we kill
 					# our tail log process but let simulator keep running
-
 					if not log == None:
 						try:
 							os.system("kill -2 %s" % str(log.pid))
@@ -956,8 +1130,15 @@ def main(args):
 							pass
 
 					script_ok = True
-
-
+					
+				###########################################################################	
+				# END OF SIMULATOR COMMAND	
+				###########################################################################	
+				
+				
+				#
+				# this command is run for installing an app on device
+				#
 				elif command == 'install':
 
 					args += [
@@ -990,6 +1171,8 @@ def main(args):
 						o.write("+ Will try and open %s\n" % app_dir)
 						ipa = app_dir
 
+					# to force iTunes to install our app, we simply open the IPA
+					# file in itunes
 					cmd = "open -b com.apple.itunes \"%s\"" % ipa
 					o.write("+ Executing the command: %s\n" % cmd)
 					os.system(cmd)
@@ -1008,7 +1191,14 @@ def main(args):
 					o.write("Finishing build\n")
 					sys.stdout.flush()
 					script_ok = True
+					
+				###########################################################################	
+				# END OF INSTALL COMMAND	
+				###########################################################################	
 
+				#
+				# this command is run for packaging an app for distribution
+				#
 				elif command == 'distribute':
 
 					deploytype = "production"
@@ -1025,6 +1215,8 @@ def main(args):
 					os.chdir(build_dir)
 
 					# starting in 4.0, apple now requires submission through XCode
+					# this code mimics what xcode does on its own to package the 
+					# application for the app uploader process
 					archive_uuid = str(uuid.uuid4()).upper()
 					archive_dir = os.path.join(os.path.expanduser("~/Library/MobileDevice/Archived Applications"),archive_uuid)
 					archive_app_dir = os.path.join(archive_dir,"%s.app" % name)
@@ -1064,9 +1256,14 @@ def main(args):
 					o.write("Finishing build\n")
 					script_ok = True
 
+				###########################################################################	
+				# END OF DISTRIBUTE COMMAND	
+				###########################################################################	
+
 			finally:
 				os.chdir(cwd)
 		except:
+			print "[ERROR] Error: %s" % traceback.format_exc()
 			if not script_ok:
 				o.write("\nException detected in script:\n")
 				traceback.print_exc(file=o)

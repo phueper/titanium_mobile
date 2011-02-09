@@ -13,6 +13,8 @@
 
 - (TiHost*)host;
 
+- (NSString*)basename;
+
 - (void)evalJSWithoutResult:(NSString*)code;
 
 - (void)evalFile:(NSString*)file;
@@ -22,7 +24,7 @@
 
 - (void)fireEvent:(id)listener withObject:(id)obj remove:(BOOL)yn thisObject:(id)thisObject_;
 
-- (id)preloadForKey:(id)key;
+- (id)preloadForKey:(id)key name:(id)key;
 
 - (KrollContext*)krollContext;
 

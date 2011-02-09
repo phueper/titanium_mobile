@@ -6,19 +6,39 @@
  */
 package ti.modules.titanium.ui;
 
+import org.appcelerator.kroll.KrollDict;
+import org.appcelerator.kroll.annotations.Kroll;
 import org.appcelerator.titanium.TiContext;
-import org.appcelerator.titanium.TiDict;
 import org.appcelerator.titanium.proxy.TiViewProxy;
 import org.appcelerator.titanium.view.TiUIView;
 
 import ti.modules.titanium.ui.widget.TiUIDialog;
 import android.app.Activity;
 
+@Kroll.proxy (
+	creatableInModule=UIModule.class,
+	propertyAccessors={
+		"buttonNames",
+		"cancel",
+		"message",
+		"messageid",
+		"title"
+	}
+)
 public class AlertDialogProxy extends TiViewProxy
 {
-	public AlertDialogProxy(TiContext tiContext, Object[] args)
+	public AlertDialogProxy(TiContext tiContext)
 	{
-		super(tiContext, args);
+		super(tiContext);
+	}
+
+	@Override
+	protected KrollDict getLangConversionTable() {
+		KrollDict table = new KrollDict();
+		table.put("title","titleid");
+		table.put("ok","okid");
+		table.put("message","messageid");
+		return table;
 	}
 
 	@Override
@@ -28,7 +48,7 @@ public class AlertDialogProxy extends TiViewProxy
 	}
 
 	@Override
-	protected void handleShow(TiDict options) {
+	protected void handleShow(KrollDict options) {
 		super.handleShow(options);
 
 		TiUIDialog d = (TiUIDialog) getView(getTiContext().getActivity());
@@ -36,7 +56,7 @@ public class AlertDialogProxy extends TiViewProxy
 	}
 
 	@Override
-	protected void handleHide(TiDict options) {
+	protected void handleHide(KrollDict options) {
 		super.handleHide(options);
 
 		TiUIDialog d = (TiUIDialog) getView(getTiContext().getActivity());

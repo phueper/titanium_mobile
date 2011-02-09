@@ -18,17 +18,91 @@
 #endif
 #import "TiViewProxy.h"
 #import "TiApp.h"
+#import "UIImage+Resize.h"
 
+void InsetScrollViewForKeyboard(UIScrollView * scrollView,CGFloat keyboardTop,CGFloat minimumContentHeight)
+{
+	VerboseLog(@"ScrollView:%@, keyboardTop:%f minimumContentHeight:%f",scrollView,keyboardTop,minimumContentHeight);
+
+	CGRect scrollVisibleRect = [scrollView convertRect:[scrollView bounds] toView:[[TiApp controller] view]];
+	//First, find out how much we have to compensate.
+
+	CGFloat obscuredHeight = scrollVisibleRect.origin.y + scrollVisibleRect.size.height - keyboardTop;	
+	//ObscuredHeight is how many vertical pixels the keyboard obscures of the scroll view. Some of this may be acceptable.
+
+	CGFloat unimportantArea = MAX(scrollVisibleRect.size.height - minimumContentHeight,0);
+	//It's possible that some of the covered area doesn't matter. If it all matters, unimportant is 0.
+
+	//As such, obscuredHeight is now how much actually matters of scrollVisibleRect.
+
+	CGFloat bottomInset = MAX(0,obscuredHeight-unimportantArea);
+	[scrollView setContentInset:UIEdgeInsetsMake(0, 0, bottomInset, 0)];
+
+	CGPoint offset = [scrollView contentOffset];
+
+	if(offset.y + bottomInset < 0 )
+	{
+		offset.y = -bottomInset;
+		[scrollView setContentOffset:offset animated:YES];
+	}
+
+	VerboseLog(@"ScrollVisibleRect(%f,%f),%fx%f; obscuredHeight:%f; unimportantArea:%f",
+			scrollVisibleRect.origin.x,scrollVisibleRect.origin.y,scrollVisibleRect.size.width,scrollVisibleRect.size.height,
+			obscuredHeight,unimportantArea);
+}
+
+void OffsetScrollViewForRect(UIScrollView * scrollView,CGFloat keyboardTop,CGFloat minimumContentHeight,CGRect responderRect)
+{
+	VerboseLog(@"ScrollView:%@, keyboardTop:%f minimumContentHeight:%f responderRect:(%f,%f),%fx%f;",
+			scrollView,keyboardTop,minimumContentHeight,
+			responderRect.origin.x,responderRect.origin.y,responderRect.size.width,responderRect.size.height);
+
+	CGRect scrollVisibleRect = [scrollView convertRect:[scrollView bounds] toView:[[TiApp controller] view]];
+	//First, find out how much we have to compensate.
+
+	CGFloat obscuredHeight = scrollVisibleRect.origin.y + scrollVisibleRect.size.height - keyboardTop;	
+	//ObscuredHeight is how many vertical pixels the keyboard obscures of the scroll view. Some of this may be acceptable.
+
+	//It's possible that some of the covered area doesn't matter. If it all matters, unimportant is 0.
+
+	//As such, obscuredHeight is now how much actually matters of scrollVisibleRect.
+
+	VerboseLog(@"ScrollVisibleRect(%f,%f),%fx%f; obscuredHeight:%f;",
+			scrollVisibleRect.origin.x,scrollVisibleRect.origin.y,scrollVisibleRect.size.width,scrollVisibleRect.size.height,
+			obscuredHeight);
+
+	scrollVisibleRect.size.height -= MAX(0,obscuredHeight);
+
+	//Okay, the scrollVisibleRect.size now represents the actually visible area.
+
+	CGPoint offsetPoint = [scrollView contentOffset];
+
+	CGPoint offsetForBottomRight;
+	offsetForBottomRight.x = responderRect.origin.x + responderRect.size.width - scrollVisibleRect.size.width;
+	offsetForBottomRight.y = responderRect.origin.y + responderRect.size.height - scrollVisibleRect.size.height;
+
+	offsetPoint.x = MIN(responderRect.origin.x,MAX(offsetPoint.x,offsetForBottomRight.x));
+	offsetPoint.y = MIN(responderRect.origin.y,MAX(offsetPoint.y,offsetForBottomRight.y));
+	VerboseLog(@"OffsetForBottomright:(%f,%f) OffsetPoint:(%f,%f)",
+			offsetForBottomRight.x, offsetForBottomRight.y, offsetPoint.x, offsetPoint.y);
+
+	CGFloat maxOffset = [scrollView contentInset].bottom + [scrollView contentSize].height - scrollVisibleRect.size.height;
+	
+	if(maxOffset < offsetPoint.y)
+	{
+		offsetPoint.y = maxOffset;
+	}
+
+	[scrollView setContentOffset:offsetPoint animated:YES];
+}
 
 void ModifyScrollViewForKeyboardHeightAndContentHeightWithResponderRect(UIScrollView * scrollView,CGFloat keyboardTop,CGFloat minimumContentHeight,CGRect responderRect)
 {
-	CGRect scrollVisibleRect;
-	scrollVisibleRect = [scrollView convertRect:[scrollView bounds] toView:nil];
-	if (UIInterfaceOrientationIsLandscape([[UIApplication sharedApplication] statusBarOrientation]))
-	{
-		scrollVisibleRect.origin = CGPointMake(scrollVisibleRect.origin.y, scrollVisibleRect.origin.x);
-		scrollVisibleRect.size = CGSizeMake(scrollVisibleRect.size.height, scrollVisibleRect.size.width);
-	}
+	VerboseLog(@"ScrollView:%@, keyboardTop:%f minimumContentHeight:%f responderRect:(%f,%f),%fx%f;",
+			scrollView,keyboardTop,minimumContentHeight,
+			responderRect.origin.x,responderRect.origin.y,responderRect.size.width,responderRect.size.height);
+
+	CGRect scrollVisibleRect = [scrollView convertRect:[scrollView bounds] toView:[[TiApp controller] view]];
 	//First, find out how much we have to compensate.
 
 	CGFloat obscuredHeight = scrollVisibleRect.origin.y + scrollVisibleRect.size.height - keyboardTop;	
@@ -41,106 +115,36 @@ void ModifyScrollViewForKeyboardHeightAndContentHeightWithResponderRect(UIScroll
 
 	[scrollView setContentInset:UIEdgeInsetsMake(0, 0, MAX(0,obscuredHeight-unimportantArea), 0)];
 
+	VerboseLog(@"ScrollVisibleRect(%f,%f),%fx%f; obscuredHeight:%f; unimportantArea:%f",
+			scrollVisibleRect.origin.x,scrollVisibleRect.origin.y,scrollVisibleRect.size.width,scrollVisibleRect.size.height,
+			obscuredHeight,unimportantArea);
+
 	scrollVisibleRect.size.height -= MAX(0,obscuredHeight);
-	
+
 	//Okay, the scrollVisibleRect.size now represents the actually visible area.
-	
+
 	CGPoint offsetPoint = [scrollView contentOffset];
 
-	CGPoint offsetForBottomRight;
-	offsetForBottomRight.x = responderRect.origin.x + responderRect.size.width - scrollVisibleRect.size.width;
-	offsetForBottomRight.y = responderRect.origin.y + responderRect.size.height - scrollVisibleRect.size.height;
+	if(!CGRectIsEmpty(responderRect))
+	{
+		CGPoint offsetForBottomRight;
+		offsetForBottomRight.x = responderRect.origin.x + responderRect.size.width - scrollVisibleRect.size.width;
+		offsetForBottomRight.y = responderRect.origin.y + responderRect.size.height - scrollVisibleRect.size.height;
 	
-	offsetPoint.x = MIN(responderRect.origin.x,MAX(offsetPoint.x,offsetForBottomRight.x));
-	offsetPoint.y = MIN(responderRect.origin.y,MAX(offsetPoint.y,offsetForBottomRight.y));
+		offsetPoint.x = MIN(responderRect.origin.x,MAX(offsetPoint.x,offsetForBottomRight.x));
+		offsetPoint.y = MIN(responderRect.origin.y,MAX(offsetPoint.y,offsetForBottomRight.y));
+		VerboseLog(@"OffsetForBottomright:(%f,%f) OffsetPoint:(%f,%f)",
+				offsetForBottomRight.x, offsetForBottomRight.y, offsetPoint.x, offsetPoint.y);
+	}
+	else
+	{
+		offsetPoint.x = MAX(0,offsetPoint.x);
+		offsetPoint.y = MAX(0,offsetPoint.y);
+		VerboseLog(@"OffsetPoint:(%f,%f)",offsetPoint.x, offsetPoint.y);
+	}
 
 	[scrollView setContentOffset:offsetPoint animated:YES];
 }
-
-void RestoreScrollViewFromKeyboard(UIScrollView * scrollView)
-{
-	CGSize scrollContentSize = [scrollView contentSize];
-	CGPoint scrollOffset = [scrollView contentOffset];
-	
-	[scrollView setContentInset:UIEdgeInsetsZero];
-
-	//Reposition the scroll to handle the uncovered area.
-	CGRect scrollVisibleRect = [scrollView bounds];
-	CGFloat maxYScrollOffset = scrollContentSize.height - scrollVisibleRect.size.height;
-	if (maxYScrollOffset < scrollOffset.y)
-	{
-		scrollOffset.y = MAX(0.0,maxYScrollOffset);
-		[scrollView setContentOffset:scrollOffset animated:YES];
-	}
-}
-
-
-CGFloat AutoWidthForView(UIView * superView,CGFloat suggestedWidth)
-{
-	CGFloat result = 0.0;
-	for (TiUIView * thisChildView in [superView subviews])
-	{
-		//TODO: This should be an unnecessary check, but this happening means the child class didn't override AutoWidth when it should have.
-		if(![thisChildView respondsToSelector:@selector(minimumParentWidthForWidth:)])
-		{
-			NSLog(@"[WARN] %@ contained %@, but called AutoWidthForView was called for it anyways."
-					"This typically means that -[TIUIView autoWidthForWidth] should have been overridden.",superView,thisChildView);
-			//Treating this as if we had no autosize, and thus, 
-			return suggestedWidth;
-		}
-		//END TODO
-		result = MAX(result,[thisChildView minimumParentWidthForWidth:suggestedWidth]);
-	}
-	return result;
-}
-
-CGFloat AutoHeightForView(UIView * superView,CGFloat suggestedWidth,BOOL isVertical)
-{
-	CGFloat neededAbsoluteHeight=0.0;
-	CGFloat neededVerticalHeight=0.0;
-
-	for (TiUIView * thisChildView in [superView subviews])
-	{
-		if (![thisChildView respondsToSelector:@selector(minimumParentHeightForWidth:)])
-		{
-			continue;
-		}
-		CGFloat thisHeight = [thisChildView minimumParentHeightForWidth:suggestedWidth];
-		if (isVertical)
-		{
-			neededVerticalHeight += thisHeight;
-		}
-		else
-		{
-			neededAbsoluteHeight = MAX(neededAbsoluteHeight,thisHeight);
-		}
-	}
-	return MAX(neededVerticalHeight,neededAbsoluteHeight);
-}
-
-
-
-NSInteger zindexSort(TiUIView* view1, TiUIView* view2, void *reverse)
-{
-	int v1 = view1.zIndex;
-	int v2 = view2.zIndex;
-	
-	int result = 0;
-	
-	if (v1 < v2)
-	{
-		result = -1;
-	}
-	else if (v1 > v2)
-	{
-		result = 1;
-	}
-	
-	return result;
-}
-
-
-
 
 #define DOUBLE_TAP_DELAY		0.35
 #define HORIZ_SWIPE_DRAG_MIN	12
@@ -150,9 +154,23 @@ NSInteger zindexSort(TiUIView* view1, TiUIView* view2, void *reverse)
 
 DEFINE_EXCEPTIONS
 
-@synthesize proxy,parent,touchDelegate,backgroundImage;
+@synthesize proxy,touchDelegate,backgroundImage;
 
 #pragma mark Internal Methods
+
+#if VIEW_DEBUG
+-(id)retain
+{
+	[super retain];
+	NSLog(@"[VIEW %@] RETAIN: %d", self, [self retainCount]);
+}
+
+-(oneway void)release
+{
+	NSLog(@"[VIEW %@] RELEASE: %d", self, [self retainCount]-1);
+	[super release];
+}
+#endif
 
 -(void)dealloc
 {
@@ -161,7 +179,6 @@ DEFINE_EXCEPTIONS
     RELEASE_TO_NIL(backgroundImage);
 	RELEASE_TO_NIL(gradientLayer);
 	proxy = nil;
-	parent = nil;
 	touchDelegate = nil;
 	[super dealloc];
 }
@@ -241,34 +258,15 @@ DEFINE_EXCEPTIONS
     }
 }
 
--(void)willSendConfiguration
-{
-}
-
--(void)didSendConfiguration
-{
-	configured = YES;
-}
-
 -(void)configurationSet
 {
 	// can be used to trigger things after all properties are set
-}
-
--(BOOL)viewConfigured
-{
-	return configured;
 }
 
 -(void)setProxy:(TiProxy *)p
 {
 	proxy = p;
 	[proxy setModelDelegate:self];
-}
-
--(void)setParent:(TiViewProxy *)p
-{
-	parent = p;
 }
 
 -(UIImage*)loadImage:(id)image 
@@ -288,171 +286,7 @@ DEFINE_EXCEPTIONS
 	return transformMatrix;
 }
 
-#pragma mark Legacy layout calls
-/*	These methods are due to layoutProperties and such things origionally being a property of UIView
-	and not the proxy. To lessen dependance on UIView (In cases where layout is needed without views
-	such as TableViews), this was moved to the proxy. In order to degrade gracefully, these shims are
-	left here. They should not be relied upon, but instead used to find methods that still incorrectly
-	rely on the view, and fix those methods.
-*/
-
--(LayoutConstraint*)layoutProperties
-{
-	NSLog(@"[DEBUG] Using view proxy via redirection instead of directly for %@.",self);
-	return [(TiViewProxy *)proxy layoutProperties];
-}
-
--(void)setLayoutProperties:(LayoutConstraint *)layout_
-{
-	NSLog(@"[DEBUG] Using view proxy via redirection instead of directly for %@.",self);
-	[(TiViewProxy *)proxy setLayoutProperties:layout_];
-}
-
--(CGFloat)minimumParentWidthForWidth:(CGFloat)value
-{
-	NSLog(@"[DEBUG] Using view proxy via redirection instead of directly for %@.",self);
-	return [(TiViewProxy *)[self proxy] minimumParentWidthForWidth:value];
-}
-
--(CGFloat)minimumParentHeightForWidth:(CGFloat)value
-{
-	NSLog(@"[DEBUG] Using view proxy via redirection instead of directly for %@.",self);
-	return [(TiViewProxy *)[self proxy] minimumParentHeightForWidth:value];
-}
-
--(CGFloat)autoWidthForWidth:(CGFloat)value
-{
-	NSLog(@"[DEBUG] Using view proxy via redirection instead of directly for %@.",self);
-	return [(TiViewProxy *)[self proxy] autoWidthForWidth:value];
-}
-
--(CGFloat)autoHeightForWidth:(CGFloat)value
-{
-	NSLog(@"[DEBUG] Using view proxy via redirection instead of directly for %@.",self);
-	return [(TiViewProxy *)[self proxy] autoHeightForWidth:value];
-}
-
-
-
-
 #pragma mark Layout 
-
-
--(void)insertIntoView:(UIView*)newSuperview bounds:(CGRect)bounds
-{
-	if (newSuperview==self)
-	{
-		NSLog(@"[ERROR] invalid call to insertIntoView, new super view is same as myself");
-		return;
-	}
-	ApplyConstraintToViewWithinViewWithBounds([(TiViewProxy *)proxy layoutProperties], self, newSuperview, bounds,YES);
-	[(TiViewProxy *)[self proxy] clearNeedsReposition];
-}
-
--(void)relayout:(CGRect)bounds
-{
-	if (repositioning==NO)
-	{
-		repositioning = YES;
-		oldSize = CGSizeZero;
-		ApplyConstraintToViewWithinViewWithBounds([(TiViewProxy *)proxy layoutProperties], self, [self superview], bounds, YES);
-		[(TiViewProxy *)[self proxy] clearNeedsReposition];
-		repositioning = NO;
-	}
-#ifdef VERBOSE
-	else
-	{
-		NSLog(@"[INFO] %@ Calling Relayout from within relayout.",self);
-	}
-#endif
-
-}
-
--(void)relayoutOnUIThread:(NSValue*)value
-{
-	CGRect bounds = [value CGRectValue];
-	[self relayout:bounds];
-}
-
--(void)updateLayout:(LayoutConstraint*)layout_ withBounds:(CGRect)bounds
-{
-	if ([NSThread isMainThread]==NO)
-	{
-		[self performSelectorOnMainThread:@selector(relayoutOnUIThread:) withObject:[NSValue valueWithCGRect:bounds] waitUntilDone:NO];
-		return;
-	}
-	if (animating)
-	{
-#ifdef DEBUG		
-		// changing the layout while animating is bad, ignore for now
-		NSLog(@"[DEBUG] ignoring new layout while animating..");
-#endif		
-		return;
-	}
-	[self relayout:bounds];
-}
-
--(void)performZIndexRepositioning
-{
-	if ([[self subviews] count] == 0)
-	{
-		return;
-	}
-	
-	if (![NSThread isMainThread])
-	{
-		[self performSelectorOnMainThread:@selector(performZIndexRepositioning) withObject:nil waitUntilDone:NO];
-		return;
-	}
-	
-	// sort by zindex
-	
-	//TODO: This doesn't work with scrollable and scroll views. Really, this should be refactored out.
-	
-	NSMutableArray * validChildren = nil;
-	for (UIView * thisView in [self subviews])
-	{
-		if ([thisView isKindOfClass:[TiUIView class]])
-		{
-			if(validChildren == nil)
-			{
-				validChildren = [[NSMutableArray alloc] initWithObjects:thisView,nil];
-			}
-			else
-			{
-				[validChildren addObject:thisView];
-			}
-		}
-	}
-	
-	[validChildren sortUsingFunction:zindexSort context:NULL];
-	for (UIView * thisView in validChildren)
-	{
-		[thisView removeFromSuperview];
-		[self addSubview:thisView];
-		[thisView repositionZIndexIfNeeded];
-	}
-
-	[validChildren release];
-}
-
--(unsigned int)zIndex
-{
-	return zIndex;
-}
-
--(void)repositionZIndexIfNeeded
-{
-	if ([(TiViewProxy*)proxy needsZIndexRepositioning])
-	{
-		[self repositionZIndex];
-	}
-}
-
--(void)repositionZIndex
-{
-	[(TiViewProxy*)self.proxy setNeedsZIndexRepositioning];
-}
 
 -(BOOL)animationFromArgument:(id)args
 {
@@ -574,15 +408,20 @@ DEFINE_EXCEPTIONS
 -(void)setBackgroundImage_:(id)image
 {
 	NSURL *bgURL = [TiUtils toURL:image proxy:proxy];
-	UIImage *resultImage = [[ImageLoader sharedLoader] loadImmediateStretchableImage:bgURL
-                                                                         withLeftCap:leftCap
-                                                                          topCap:topCap];
+	UIImage *resultImage = [[ImageLoader sharedLoader] loadImmediateImage:bgURL];
 	if (resultImage==nil && [image isEqualToString:@"Default.png"])
 	{
 		// special case where we're asking for Default.png and it's in Bundle not path
 		resultImage = [UIImage imageNamed:image];
 	}
+	if((resultImage != nil) && ([resultImage imageOrientation] != UIImageOrientationUp))
+	{
+		resultImage = [UIImageResize resizedImage:[resultImage size] 
+							 interpolationQuality:kCGInterpolationNone image:resultImage hires:NO];
+	}
+
 	self.layer.contents = (id)resultImage.CGImage;
+	self.layer.contentsCenter = TiDimensionLayerContentCenter(topCap, leftCap, topCap, leftCap, [resultImage size]);
 	self.clipsToBounds = image!=nil;
     self.backgroundImage = image;
 }
@@ -632,16 +471,11 @@ DEFINE_EXCEPTIONS
 {
 	self.hidden = ![TiUtils boolValue:visible];
     
-    // Redraw ourselves if changing from invisible to visible, to handle any changes made
-    if (!self.hidden) {
-        [(TiViewProxy*)[self proxy] reposition];
-    }
-}
-
--(void)setZIndex_:(id)z
-{
-	zIndex = [TiUtils intValue:z];
-	[self repositionZIndex];
+//	Redraw ourselves if changing from invisible to visible, to handle any changes made
+	if (!self.hidden) {
+		TiViewProxy* viewProxy = (TiViewProxy*)[self proxy];
+		[viewProxy reposition];
+	}
 }
 
 -(void)setAnimation_:(id)arg
@@ -684,6 +518,14 @@ DEFINE_EXCEPTIONS
 	}
 }
 
+-(void)didAddSubview:(UIView*)view
+{
+	// So, it turns out that adding a subview places it beneath the gradient layer.
+	// Every time we add a new subview, we have to make sure the gradient stays where it belongs...
+	if (gradientLayer != nil) {
+		[[[self gradientWrapperView] layer] insertSublayer:gradientLayer atIndex:0];
+	}
+}
 
 -(void)animate:(id)arg
 {
@@ -722,6 +564,11 @@ DEFINE_EXCEPTIONS
 -(void)animationCompleted
 {
 	animating = NO;
+}
+
+-(BOOL)animating
+{
+	return animating;
 }
 
 #pragma mark Property Change Support
@@ -830,7 +677,7 @@ DEFINE_EXCEPTIONS
 
 -(void)makeRootViewFirstResponder
 {
-	[[[TiApp app] controller].view becomeFirstResponder];
+	[[[TiApp controller] view] becomeFirstResponder];
 }
 
 #pragma mark Touch Events

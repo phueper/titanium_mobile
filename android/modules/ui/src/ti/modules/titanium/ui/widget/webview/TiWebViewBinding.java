@@ -12,24 +12,51 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.concurrent.Semaphore;
 
-import org.appcelerator.titanium.TiActivity;
+import org.appcelerator.kroll.KrollDict;
+import org.appcelerator.kroll.KrollInvocation;
+import org.appcelerator.kroll.KrollMethod;
+import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.titanium.TiContext;
-import org.appcelerator.titanium.TiDict;
-import org.appcelerator.titanium.TiContext.OnLifecycleEvent;
-import org.appcelerator.titanium.kroll.IKrollCallable;
 import org.appcelerator.titanium.util.Log;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import ti.modules.titanium.api.APIModule;
 import ti.modules.titanium.app.AppModule;
-import android.app.Activity;
 import android.webkit.WebView;
 
 public class TiWebViewBinding {
 
 	private static final String LCAT = "TiWebViewBinding";
-	
+	// This is based on binding.min.js.  If you have to change anything...
+	// - change binding.js
+	// - minify binding.js to create binding.min.js
+	protected final static String SCRIPT_INJECTION_ID = "__ti_injection";
+	protected final static String INJECTION_CODE;
+	static {
+		StringBuilder jsonCode = readResourceFile("json2.js");
+		StringBuilder tiCode = readResourceFile("binding.min.js");
+		StringBuilder allCode = new StringBuilder();
+		allCode.append("\n<script id=\"" + SCRIPT_INJECTION_ID + "\">\n");
+		if (jsonCode == null) {
+			Log.w(LCAT, "Unable to read JSON code for injection");
+		} else {
+			allCode.append(jsonCode);
+		}
+
+		if (tiCode == null) {
+			Log.w(LCAT, "Unable to read Titanium binding code for injection");
+		} else {
+			allCode.append("\n");
+			allCode.append(tiCode.toString());
+		}
+		allCode.append("\n</script>\n");
+		jsonCode = null;
+		tiCode = null;
+		INJECTION_CODE = allCode.toString();
+		allCode = null;
+	}
+
 	private WebView webView;
 	private APIBinding apiBinding;
 	private AppBinding appBinding;
@@ -43,32 +70,34 @@ public class TiWebViewBinding {
 		webView.addJavascriptInterface(apiBinding, "TiAPI");
 		webView.addJavascriptInterface(appBinding, "TiApp");
 		webView.addJavascriptInterface(new TiReturn(), "_TiReturn");
-		insertApiBindings();		
-	}
 	
-	public void insertApiBindings() 
-	{
-		evalJS(getClass().getClassLoader().getResourceAsStream("ti/modules/titanium/ui/widget/webview/json2.js"));
-		evalJS(getClass().getClassLoader().getResourceAsStream("ti/modules/titanium/ui/widget/webview/binding.js"));	
 	}
 	
 	public void destroy() {
-		appBinding.module.onDestroy();
-		apiBinding.module.onDestroy();
 	}
 	
-	private void evalJS(InputStream stream)
+	private static StringBuilder readResourceFile(String fileName)
 	{
+		InputStream stream = TiWebViewBinding.class.getClassLoader().getResourceAsStream("ti/modules/titanium/ui/widget/webview/" + fileName);
 		BufferedReader reader = new BufferedReader(new InputStreamReader(stream));
-		StringBuffer code = new StringBuffer();
+		StringBuilder code = new StringBuilder();
 		try {
 			for (String line = reader.readLine(); line != null; line = reader.readLine()) {
 				code.append(line+"\n");
 			}
-			evalJS(code.toString());
 		} catch (IOException e) {
 			Log.e(LCAT, "Error reading input stream", e);
+			return null;
+		} finally {
+			if (stream != null) {
+				try {
+					stream.close();
+				} catch (IOException e) {
+					Log.w(LCAT, "Problem closing input stream.", e);
+				}
+			}
 		}
+		return code;
 	}
 	
 	private void evalJS(String code)
@@ -80,7 +109,7 @@ public class TiWebViewBinding {
 	private String returnValue;
 	public String getJSValue(String expression)
 	{
-		String code = "javascript:_TiReturn.setValue((function(){return "+expression+"+\"\";})());";
+		String code = "javascript:_TiReturn.setValue((function(){try{return "+expression+"+\"\";}catch(ti_eval_err){return '';}})());";
 		Log.d(LCAT, "getJSValue:"+code);
 		webView.loadUrl(code);
 		try {
@@ -92,7 +121,7 @@ public class TiWebViewBinding {
 		return null;
 	}
 	
-	
+	@SuppressWarnings("unused")
 	private class TiReturn {
 		public void setValue(String value) {
 			if (value != null) {
@@ -102,28 +131,32 @@ public class TiWebViewBinding {
 		}
 	}
 	
-	private class WebViewCallback implements IKrollCallable
+	@SuppressWarnings("serial")
+	private class WebViewCallback extends KrollMethod
 	{
 		private int id;
 		public WebViewCallback(int id) {
+			super("webViewCallback$"+id);
 			this.id = id;
 		}
 		
-		// These shouldn't be necessary?
-		public void call() {}
-		public void call(Object[] args) {}
-		
-		public void callWithProperties(TiDict data) {
-			String code = "Ti.executeListener("+id+", "+data.toString()+");";
-			evalJS(code);
+		@Override
+		public Object invoke(KrollInvocation invocation, Object[] args) {
+			if (args.length > 0 && args[0] instanceof KrollDict) {
+				KrollDict data = (KrollDict) args[0];
+				String code = "Ti.executeListener("+id+", "+data.toString()+");";
+				evalJS(code);
+			}
+			return KrollProxy.UNDEFINED;
 		}
 	}
 
+	@SuppressWarnings("unused")
 	private class APIBinding
 	{
 		private APIModule module;
 		public APIBinding(TiContext context) {
-			module = new APIModule(context);
+			module = context.getTiApp().getModuleByClass(APIModule.class);
 		}
 		public void critical(String msg) {
 			module.critical(msg);
@@ -153,22 +186,23 @@ public class TiWebViewBinding {
 			module.warn(msg);
 		}
 	}
-	
+
+	@SuppressWarnings("unused")
 	private class AppBinding
 	{
 		private AppModule module;
 		
 		public AppBinding(TiContext context)
 		{
-			module = new AppModule(context);
+			module = context.getTiApp().getModuleByClass(AppModule.class);
 		}
 		
 		public void fireEvent(String event, String json)
 		{
 			try {
-				TiDict dict = new TiDict();
+				KrollDict dict = new KrollDict();
 				if (json != null && !json.equals("undefined")) {
-					dict = new TiDict(new JSONObject(json));
+					dict = new KrollDict(new JSONObject(json));
 				}
 				module.fireEvent(event, dict);
 			} catch (JSONException e) {
@@ -178,12 +212,17 @@ public class TiWebViewBinding {
 		
 		public int addEventListener(String event, int id)
 		{
-			return module.addEventListener(event, new WebViewCallback(id));
+			KrollInvocation invocation = KrollInvocation.createMethodInvocation(module.getTiContext(), module.getTiContext().getScope(), null, "addEventListener", null, module);
+			int listenerId = module.addEventListener(invocation, event, new WebViewCallback(id));
+			invocation.recycle();
+			return listenerId;
 		}
 		
 		public void removeEventListener(String event, int id)
 		{
-			module.removeEventListener(event, id);
+			KrollInvocation invocation = KrollInvocation.createMethodInvocation(module.getTiContext(), module.getTiContext().getScope(), null, "removeEventListener", null, module);
+			module.removeEventListener(invocation, event, id);
+			invocation.recycle();
 		}
 	}
 }

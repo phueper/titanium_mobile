@@ -1,6 +1,6 @@
 /**
  * Appcelerator Titanium Mobile
- * Copyright (c) 2009-2010 by Appcelerator, Inc. All Rights Reserved.
+ * Copyright (c) 2009-2011 by Appcelerator, Inc. All Rights Reserved.
  * Licensed under the terms of the Apache Public License
  * Please see the LICENSE included with this distribution for details.
  */
@@ -18,13 +18,14 @@ import java.util.Locale;
 
 import kankan.wheel.widget.WheelView;
 
-import org.appcelerator.titanium.TiDict;
-import org.appcelerator.titanium.TiProxy;
+import org.appcelerator.kroll.KrollDict;
+import org.appcelerator.kroll.KrollProxy;
 import org.appcelerator.titanium.proxy.TiViewProxy;
 import org.appcelerator.titanium.util.Log;
 import org.appcelerator.titanium.util.TiConvert;
 import org.appcelerator.titanium.view.TiUIView;
 
+import android.app.Activity;
 import android.widget.LinearLayout;
 
 public class TiUIDateSpinner extends TiUIView
@@ -52,33 +53,37 @@ public class TiUIDateSpinner extends TiUIView
 	public TiUIDateSpinner(TiViewProxy proxy)
 	{
 		super(proxy);
-		createNativeView();
+	}
+	public TiUIDateSpinner(TiViewProxy proxy, Activity activity)
+	{
+		this(proxy);
+		createNativeView(activity);
 	}
 	
-	private void createNativeView()
+	private void createNativeView(Activity activity)
 	{
 		// defaults
 		maxDate.set(calendar.get(Calendar.YEAR) + 100, 11, 31);
 		minDate.set(calendar.get(Calendar.YEAR) - 100, 0, 1);
 		
 		
-		monthWheel = new WheelView(proxy.getContext());
-		dayWheel = new WheelView(proxy.getContext());
-		yearWheel = new WheelView(proxy.getContext());
+		monthWheel = new WheelView(activity);
+		dayWheel = new WheelView(activity);
+		yearWheel = new WheelView(activity);
 		
 		monthWheel.setTextSize(20);
 		dayWheel.setTextSize(monthWheel.getTextSize());
 		yearWheel.setTextSize(monthWheel.getTextSize());
 		
-    	monthWheel.setItemSelectedListener(this);
-    	dayWheel.setItemSelectedListener(this);
-    	yearWheel.setItemSelectedListener(this);
-        
-		LinearLayout layout = new LinearLayout(proxy.getContext());
+		monthWheel.setItemSelectedListener(this);
+		dayWheel.setItemSelectedListener(this);
+		yearWheel.setItemSelectedListener(this);
+		
+		LinearLayout layout = new LinearLayout(activity);
 		layout.setOrientation(LinearLayout.HORIZONTAL);
 		
-		if (proxy.hasDynamicValue("dayBeforeMonth")) {
-			dayBeforeMonth = TiConvert.toBoolean(proxy.getDynamicProperties(), "dayBeforeMonth");
+		if (proxy.hasProperty("dayBeforeMonth")) {
+			dayBeforeMonth = TiConvert.toBoolean(proxy.getProperties(), "dayBeforeMonth");
 		}
 		
 		if (dayBeforeMonth) {
@@ -95,7 +100,7 @@ public class TiUIDateSpinner extends TiUIView
 	}
 	
 	@Override
-	public void processProperties(TiDict d) {
+	public void processProperties(KrollDict d) {
 		super.processProperties(d);
 		
 		boolean valueExistsInProxy = false;
@@ -143,14 +148,13 @@ public class TiUIDateSpinner extends TiUIView
         setValue(calendar.getTimeInMillis() , true);
         
         if (!valueExistsInProxy) {
-        	proxy.internalSetDynamicValue("value", calendar.getTime(), false);
+        	proxy.setProperty("value", calendar.getTime());
         }
       
 	}
 	
 	@Override
-	public void propertyChanged(String key, Object oldValue, Object newValue,
-			TiProxy proxy)
+	public void propertyChanged(String key, Object oldValue, Object newValue, KrollProxy proxy)
 	{
 		if ("value".equals(key)) {
 			Date date = (Date)newValue;
@@ -297,11 +301,11 @@ public class TiUIDateSpinner extends TiUIView
 		setAdapters();
 		
 		syncWheels();
-		proxy.internalSetDynamicValue("value", newVal, false);
+		proxy.setProperty("value", newVal);
 		
 		if (isChanged && !suppressEvent) {
 			if (!suppressChangeEvent) {
-				TiDict data = new TiDict();
+				KrollDict data = new KrollDict();
 				data.put("value", newVal);
 				proxy.fireEvent("change", data);
 			}

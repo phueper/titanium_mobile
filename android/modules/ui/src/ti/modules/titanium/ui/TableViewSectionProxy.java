@@ -8,19 +8,20 @@ package ti.modules.titanium.ui;
 
 import java.util.ArrayList;
 
+import org.appcelerator.kroll.annotations.Kroll;
 import org.appcelerator.titanium.TiContext;
 import org.appcelerator.titanium.proxy.TiViewProxy;
 import org.appcelerator.titanium.view.TiUIView;
 
 import android.app.Activity;
 
+@Kroll.proxy(creatableInModule=UIModule.class)
 public class TableViewSectionProxy extends TiViewProxy
 {
+	protected ArrayList<TableViewRowProxy> rows;
 
-	ArrayList<TableViewRowProxy> rows;
-
-	public TableViewSectionProxy(TiContext tiContext, Object[] args) {
-		super(tiContext, args);
+	public TableViewSectionProxy(TiContext tiContext) {
+		super(tiContext);
 		rows = new ArrayList<TableViewRowProxy>();
 	}
 
@@ -29,15 +30,18 @@ public class TableViewSectionProxy extends TiViewProxy
 		return null;
 	}
 
+	@Kroll.method @Kroll.getProperty
 	public TableViewRowProxy[] getRows()
 	{
 		return rows.toArray(new TableViewRowProxy[rows.size()]);
 	}
 
+	@Kroll.getProperty @Kroll.method
 	public double getRowCount() {
 		return rows.size();
 	}
 
+	@Kroll.method
 	public void add(TableViewRowProxy rowProxy)
 	{
 		if (rowProxy != null) {
@@ -48,6 +52,7 @@ public class TableViewSectionProxy extends TiViewProxy
 		}
 	}
 
+	@Kroll.method
 	public void remove(TableViewRowProxy rowProxy) {
 		if (rowProxy != null) {
 			rows.remove(rowProxy);
@@ -57,6 +62,7 @@ public class TableViewSectionProxy extends TiViewProxy
 		}
 	}
 
+	@Kroll.method
 	public TableViewRowProxy rowAtIndex(int index)
 	{
 		TableViewRowProxy result = null;
@@ -67,17 +73,17 @@ public class TableViewSectionProxy extends TiViewProxy
 		return result;
 	}
 
+	@Kroll.method
 	public void insertRowAt(int index, TableViewRowProxy row) {
 		rows.add(index, row);
 	}
 
+	@Kroll.method
 	public void removeRowAt(int index) {
 		rows.remove(index);
 	}
-
-	public void updateRowAt(int index, TableViewRowProxy row)
-	{
-		//TODO this may not be the most efficient way to handle this model change
+	@Kroll.method
+	public void updateRowAt(int index, TableViewRowProxy row) {
 		rows.set(index, row);
 	}
 	
@@ -95,6 +101,5 @@ public class TableViewSectionProxy extends TiViewProxy
 				row.releaseViews();
 			}
 		}
-		rows.clear();
 	}
 }

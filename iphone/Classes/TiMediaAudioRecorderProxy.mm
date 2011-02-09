@@ -30,7 +30,7 @@
 	format = [[NSNumber numberWithUnsignedInt:kAudioFileCAFType] retain];
 	compression = [[NSNumber numberWithUnsignedInt:kAudioFormatLinearPCM] retain];
 	
-	WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+	WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
 	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(audioInterruptionBegin:) name:kTiMediaAudioSessionInterruptionBegin object:[TiMediaAudioSession sharedSession]];
 	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(audioInterruptionEnd:) name:kTiMediaAudioSessionInterruptionEnd object:[TiMediaAudioSession sharedSession]];
 	[super _configure];
@@ -49,7 +49,7 @@
 		recorder = NULL;
 	}
 	RELEASE_TO_NIL(file);
-	WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+	WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
 	[[NSNotificationCenter defaultCenter] removeObserver:self name:kTiMediaAudioSessionInterruptionBegin object:[TiMediaAudioSession sharedSession]];
 	[[NSNotificationCenter defaultCenter] removeObserver:self name:kTiMediaAudioSessionInterruptionEnd object:[TiMediaAudioSession sharedSession]];
 	[super _destroy];
@@ -201,16 +201,16 @@
 {
     UInt32 newMode = [mode unsignedIntegerValue]; // Close as we can get to UInt32
     if (newMode != kAudioSessionCategory_RecordAudio && newMode != kAudioSessionCategory_PlayAndRecord) {
-        NSLog(@"Invalid mode for audio recorder... setting to default.");
+        NSLog(@"[WARN] Invalid mode for audio recorder... setting to default.");
         newMode = kAudioSessionCategory_RecordAudio;
     }
-	NSLog(@"'Titanium.Media.AudioRecorder.audioSessionMode' is deprecated; use 'Titanium.Media.audioSessionMode'");
+	NSLog(@"[WARN] 'Titanium.Media.AudioRecorder.audioSessionMode' is deprecated; use 'Titanium.Media.audioSessionMode'");
 	[[TiMediaAudioSession sharedSession] setSessionMode:newMode];
 }
 
 -(NSNumber*)audioSessionMode
 {
-	NSLog(@"'Titanium.Media.AudioRecorder.audioSessionMode' is deprecated; use 'Titanium.Media.audioSessionMode'");	
+	NSLog(@"[WARN] 'Titanium.Media.AudioRecorder.audioSessionMode' is deprecated; use 'Titanium.Media.audioSessionMode'");	
     return [NSNumber numberWithUnsignedInt:[[TiMediaAudioSession sharedSession] sessionMode]];
 }
 

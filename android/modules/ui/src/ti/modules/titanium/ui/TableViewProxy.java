@@ -7,13 +7,15 @@
 package ti.modules.titanium.ui;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 
+import org.appcelerator.kroll.KrollDict;
+import org.appcelerator.kroll.KrollProxy;
+import org.appcelerator.kroll.annotations.Kroll;
+import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.TiContext;
-import org.appcelerator.titanium.TiDict;
-import org.appcelerator.titanium.TiProxy;
 import org.appcelerator.titanium.proxy.TiViewProxy;
 import org.appcelerator.titanium.util.AsyncResult;
+import org.appcelerator.titanium.util.Log;
 import org.appcelerator.titanium.util.TiConfig;
 import org.appcelerator.titanium.util.TiConvert;
 import org.appcelerator.titanium.view.TiUIView;
@@ -22,13 +24,21 @@ import ti.modules.titanium.ui.widget.TiUITableView;
 import android.app.Activity;
 import android.os.Message;
 
+@Kroll.proxy(creatableInModule=UIModule.class)
 public class TableViewProxy extends TiViewProxy
 {
-	private static final String LCAT = "TableViewProxyl";
+	private static final String LCAT = "TableViewProxy";
 	private static final boolean DBG = TiConfig.LOGD;
 
+	private static final int INSERT_ROW_BEFORE = 0;
+	private static final int INSERT_ROW_AFTER = 1;
+	
 	private static final int MSG_UPDATE_VIEW = TiViewProxy.MSG_LAST_ID + 5001;
 	private static final int MSG_SCROLL_TO_INDEX = TiViewProxy.MSG_LAST_ID + 5002;
+	private static final int MSG_SET_DATA = TiViewProxy.MSG_LAST_ID + 5003;
+	private static final int MSG_DELETE_ROW = TiViewProxy.MSG_LAST_ID + 5004;
+	private static final int MSG_INSERT_ROW = TiViewProxy.MSG_LAST_ID + 5005;
+	private static final int MSG_APPEND_ROW = TiViewProxy.MSG_LAST_ID + 5006;
 
 	public static final String CLASSNAME_DEFAULT = "__default__";
 	public static final String CLASSNAME_HEADER = "__header__";
@@ -43,14 +53,25 @@ public class TableViewProxy extends TiViewProxy
 
 	private ArrayList<TableViewSectionProxy> localSections;
 
-	public TableViewProxy(TiContext tiContext, Object[] args) {
-		super(tiContext, args);
+	public TableViewProxy(TiContext tiContext) {
+		super(tiContext);
 		
-		tiContext.addOnEventChangeListener(this);
-		Object o = getDynamicValue("data");
-		if (o != null) {
-			processData((Object[]) o);
-			getDynamicProperties().remove("data"); // don't hide getData
+		eventManager.addOnEventChangeListener(this);
+	}
+	
+	@Override
+	public void handleCreationDict(KrollDict dict) {
+		Object data[] = null;
+		if (dict.containsKey(TiC.PROPERTY_DATA)) {
+			Object o = dict.get(TiC.PROPERTY_DATA);
+			if (o != null && o instanceof Object[]) {
+				data = (Object[]) o;
+				dict.remove(TiC.PROPERTY_DATA); // don't override our data accessor
+			}
+		}
+		super.handleCreationDict(dict);
+		if (data != null) {
+			processData(data);
 		}
 	}
 
@@ -63,7 +84,6 @@ public class TableViewProxy extends TiViewProxy
 				section.releaseViews();
 			}
 		}
-		localSections.clear();
 	}
 
 	@Override
@@ -72,20 +92,21 @@ public class TableViewProxy extends TiViewProxy
 	}
 
 	public TiUITableView getTableView() {
-		return (TiUITableView) getView(getTiContext().getActivity());
+		TiContext ctx = getTiContext();
+		if (ctx != null) {
+			return (TiUITableView) getView(ctx.getActivity());
+		} 
+		return null;
 	}
-	
-	public void updateRow(Object row, Object data, TiDict options) {
-		TableViewRowProxy rowProxy = null;
+
+	@Kroll.method
+	public void updateRow(Object row, Object data, @Kroll.argument(optional=true) KrollDict options) {
 		TableViewSectionProxy sectionProxy = null;
 		int rowIndex = -1;
-		
 		if (row instanceof Number) {
 			RowResult rr = new RowResult();
-
 			rowIndex = ((Number)row).intValue();
 			locateIndex(rowIndex, rr);
-			rowProxy = rr.row;
 			sectionProxy = rr.section;
 		} else if (row instanceof TableViewRowProxy) {
 			ArrayList<TableViewSectionProxy> sections = getSections();
@@ -93,7 +114,6 @@ public class TableViewProxy extends TiViewProxy
 				ArrayList<TableViewRowProxy> rows = sections.get(i).rows;
 				for (int j = 0; j < rows.size(); j++) {
 					if (rows.get(j) == row) {
-						rowProxy = (TableViewRowProxy)row;
 						sectionProxy = sections.get(i);
 						rowIndex = j;
 						break sectionLoop;
@@ -101,7 +121,6 @@ public class TableViewProxy extends TiViewProxy
 				}
 			}
 		}
-		
 		if (sectionProxy != null) {
 			sectionProxy.updateRowAt(rowIndex, rowProxyFor(data));
 			getTableView().setModelDirty();
@@ -109,28 +128,55 @@ public class TableViewProxy extends TiViewProxy
 		}
 	}
 
-	public void appendRow(Object row, TiDict options)
-	{
+	@Kroll.method
+	public void appendRow(Object row, @Kroll.argument(optional=true) KrollDict options) {
+		TiContext ctx = getTiContext();
+		if (ctx == null) {
+			Log.w(LCAT, "Context has been GC'd, not appending row");
+			return;
+		}
+		if (ctx.isUIThread()) {
+			handleAppendRow(row);
+			return;
+		}
+
+		sendBlockingUiMessage(MSG_APPEND_ROW, row);
+	}
+
+	private void handleAppendRow(Object row) {
 		TableViewRowProxy rowProxy = rowProxyFor(row);
-		
 		ArrayList<TableViewSectionProxy> sections = getSections();
 		if (sections.size() == 0) {
 			Object[] data = { rowProxy };
 			processData(data);
 		} else {
 			TableViewSectionProxy lastSection = sections.get(sections.size() - 1);
-			rowProxy.setDynamicValue("section", lastSection);
-			rowProxy.setDynamicValue("parent", lastSection);
-
+			rowProxy.setProperty(TiC.PROPERTY_SECTION, lastSection);
+			rowProxy.setProperty(TiC.PROPERTY_PARENT, lastSection);
 			lastSection.insertRowAt((int) lastSection.getRowCount(), rowProxy);
-			getTableView().setModelDirty();
 		}
-		
+		getTableView().setModelDirty();
 		updateView();
 	}
 
-	public void deleteRow(int index, TiDict options)
-	{
+	@Kroll.method
+	public void deleteRow(int index, @Kroll.argument(optional=true) KrollDict options) {
+		TiContext ctx = getTiContext();
+		if (ctx == null) {
+			Log.w(LCAT, "Context has been GC'd, not deleting row.");
+			return;
+		}
+		if (ctx.isUIThread()) {
+			handleDeleteRow(index);
+			return;
+		}
+		Message msg = getUIHandler().obtainMessage(MSG_DELETE_ROW);
+		msg.arg1 = index;
+		msg.sendToTarget();
+
+	}
+
+	private void handleDeleteRow(int index) {
 		RowResult rr = new RowResult();
 		if (locateIndex(index, rr)) {
 			rr.section.removeRowAt(rr.rowIndexInSection);
@@ -142,13 +188,14 @@ public class TableViewProxy extends TiViewProxy
 		}
 	}
 
+	@Kroll.method
 	public int getIndexByName(String name) {
 		int index = -1;
 		int idx = 0;
 		if (name != null) {
 			for (TableViewSectionProxy section : getSections()) {
 				for (TableViewRowProxy row : section.getRows()) {
-					String rname = TiConvert.toString(row.getDynamicValue("name"));
+					String rname = TiConvert.toString(row.getProperty(TiC.PROPERTY_NAME));
 					if (rname != null && name.equals(rname)) {
 						index = idx;
 						break;
@@ -163,7 +210,22 @@ public class TableViewProxy extends TiViewProxy
 		return index;
 	}
 
-	public void insertRowBefore(int index, Object data, TiDict options) {
+	@Kroll.method
+	public void insertRowBefore(int index, Object data, @Kroll.argument(optional=true) KrollDict options) {
+		TiContext ctx = getTiContext();
+		if (ctx == null) {
+			Log.w(LCAT, "Context has been GC'd, not inserting row");
+			return;
+		}
+		if (ctx.isUIThread()) {
+			handleInsertRowBefore(index, data);
+			return;
+		}
+
+		sendBlockingUiMessage(MSG_INSERT_ROW, data, INSERT_ROW_BEFORE, index);
+	}
+	
+	private void handleInsertRowBefore(int index, Object data) {
 		if (getSections().size() > 0) {
 			if (index < 0) {
 				index = 0;
@@ -186,7 +248,21 @@ public class TableViewProxy extends TiViewProxy
 		updateView();
 	}
 
-	public void insertRowAfter(int index, Object data, TiDict options) {
+	@Kroll.method
+	public void insertRowAfter(int index, Object data, @Kroll.argument(optional=true) KrollDict options) {
+		TiContext ctx = getTiContext();
+		if (ctx == null) {
+			Log.w(LCAT, "Context has been GC'd, not inserting row.");
+			return;
+		}
+		if (ctx.isUIThread()) {
+			handleInsertRowAfter(index, data);
+			return;
+		}
+		sendBlockingUiMessage(MSG_INSERT_ROW, data, INSERT_ROW_AFTER, index);
+	}
+	
+	private void handleInsertRowAfter(int index, Object data) {
 		RowResult rr = new RowResult();
 		if (locateIndex(index, rr)) {
 			// TODO check for section
@@ -200,11 +276,7 @@ public class TableViewProxy extends TiViewProxy
 		}
 	}
 
-	public void scrollToIndex(int index, TiDict options) {
-		getTableView().scrollToIndex(index);
-	}
-
-	@SuppressWarnings("unchecked")
+	@Kroll.getProperty @Kroll.method
 	public ArrayList<TableViewSectionProxy> getSections()
 	{
 		ArrayList<TableViewSectionProxy> sections = localSections;
@@ -215,48 +287,61 @@ public class TableViewProxy extends TiViewProxy
 		return sections;
 	}
 	
-	public void processData(Object[] data) {
+	public void processData(Object[] data)
+	{
 		ArrayList<TableViewSectionProxy> sections = getSections();
 		sections.clear();
 
 		TableViewSectionProxy currentSection = null;
+		if (hasProperty(TiC.PROPERTY_HEADER_TITLE)) {
+			currentSection = new TableViewSectionProxy(context);
+			sections.add(currentSection);
+			currentSection.setProperty(TiC.PROPERTY_HEADER_TITLE, getProperty(TiC.PROPERTY_HEADER_TITLE));
+		}
+		if (hasProperty(TiC.PROPERTY_FOOTER_TITLE)) {
+			if (currentSection == null) {
+				currentSection = new TableViewSectionProxy(context);
+				sections.add(currentSection);
+			}
+			currentSection.setProperty(TiC.PROPERTY_FOOTER_TITLE, getProperty(TiC.PROPERTY_FOOTER_TITLE));
+		}
 
 		for (int i = 0; i < data.length; i++) {
 			Object o = data[i];
 
-			if (o instanceof TiDict) {
-				TiDict d = (TiDict) o;
-				Object[] args = { d };
-				TableViewRowProxy rowProxy = new TableViewRowProxy(getTiContext(), args);
-				rowProxy.setDynamicValue("className", CLASSNAME_NORMAL);
-				rowProxy.setDynamicValue("rowData", data);
+			if (o instanceof KrollDict) {
+				KrollDict d = (KrollDict) o;
+				TableViewRowProxy rowProxy = new TableViewRowProxy(getTiContext());
+				rowProxy.handleCreationDict(d);
+				rowProxy.setProperty(TiC.PROPERTY_CLASS_NAME, CLASSNAME_NORMAL);
+				rowProxy.setProperty(TiC.PROPERTY_ROW_DATA, data);
 				rowProxy.setParent(this);
 
-				if (currentSection == null || d.containsKey("header")) {
-					currentSection = new TableViewSectionProxy(getTiContext(), new Object[0]);
+				if (currentSection == null || d.containsKey(TiC.PROPERTY_HEADER)) {
+					currentSection = new TableViewSectionProxy(getTiContext());
 					sections.add(currentSection);
 				}
-				if (d.containsKey("header")) {
-					currentSection.setDynamicValue("headerTitle", d.get("header"));
+				if (d.containsKey(TiC.PROPERTY_HEADER)) {
+					currentSection.setProperty(TiC.PROPERTY_HEADER_TITLE, d.get(TiC.PROPERTY_HEADER));
 				}
-				if (d.containsKey("footer")) {
-					currentSection.setDynamicValue("footerTitle", d.get("footer"));
+				if (d.containsKey(TiC.PROPERTY_FOOTER)) {
+					currentSection.setProperty(TiC.PROPERTY_FOOTER_TITLE, d.get(TiC.PROPERTY_FOOTER));
 				}
 				currentSection.add(rowProxy);
 			} else if (o instanceof TableViewRowProxy) {
 				TableViewRowProxy rowProxy = (TableViewRowProxy) o;
-				TiDict d = rowProxy.getDynamicProperties();
+				KrollDict d = rowProxy.getProperties();
 				rowProxy.setParent(this);
 
-				if (currentSection == null || d.containsKey("header")) {
-					currentSection = new TableViewSectionProxy(getTiContext(), new Object[0]);
+				if (currentSection == null || d.containsKey(TiC.PROPERTY_HEADER)) {
+					currentSection = new TableViewSectionProxy(getTiContext());
 					sections.add(currentSection);
 				}
-				if (d.containsKey("header")) {
-					currentSection.setDynamicValue("headerTitle", d.get("header"));
+				if (d.containsKey(TiC.PROPERTY_HEADER)) {
+					currentSection.setProperty(TiC.PROPERTY_HEADER_TITLE, d.get(TiC.PROPERTY_HEADER));
 				}
-				if (d.containsKey("footer")) {
-					currentSection.setDynamicValue("footerTitle", d.get("footer"));
+				if (d.containsKey(TiC.PROPERTY_FOOTER)) {
+					currentSection.setProperty(TiC.PROPERTY_FOOTER_TITLE, d.get(TiC.PROPERTY_FOOTER));
 				}
 
 				currentSection.add((TableViewRowProxy) o);
@@ -268,31 +353,50 @@ public class TableViewProxy extends TiViewProxy
 		}
 	}
 
-	public void setData(Object[] data, TiDict options) {
+	@Kroll.setProperty @Kroll.method
+	public void setData(Object[] data, @Kroll.argument(optional=true) KrollDict options) {
+		TiContext ctx = getTiContext();
+		Object[] actualData = data;
+		if (data != null && data.length > 0 && data[0] instanceof Object[]) {
+			actualData = (Object[]) data[0];
+		}
+		if (ctx == null) {
+			Log.w(LCAT, "Context has been GC'd, not setting table data.");
+			return;
+		}
+		if (ctx.isUIThread()) {
+			handleSetData(actualData);
+		} else {
+			sendBlockingUiMessage(MSG_SET_DATA, actualData);
+		}
+	}
+	
+	private void handleSetData(Object[] data) {
 		if (data != null) {
 			processData(data);
 			getTableView().setModelDirty();
 			updateView();
-		}
+		} 
 	}
 	
+	@Kroll.getProperty @Kroll.method
 	public Object[] getData() {
 		ArrayList<TableViewSectionProxy> sections = getSections();
 		if (sections != null) {
 			return sections.toArray();
 		}
 		
-		return new Object[0];		
+		return new Object[0];
 	}
 
 	private TableViewRowProxy rowProxyFor(Object row) {
 		TableViewRowProxy rowProxy = null;
-		if (row instanceof TiDict) {
-			TiDict d = (TiDict) row;
-			Object[] args = { d };
-			rowProxy = new TableViewRowProxy(getTiContext(), args);
-			rowProxy.setDynamicValue("className", CLASSNAME_NORMAL);
-			rowProxy.setDynamicValue("rowData", row);
+		if (row instanceof KrollDict) {
+			KrollDict d = (KrollDict) row;
+			rowProxy = new TableViewRowProxy(getTiContext());
+			rowProxy.handleCreationDict(d);
+			rowProxy.setProperty(TiC.PROPERTY_CLASS_NAME, CLASSNAME_NORMAL);
+			rowProxy.setProperty(TiC.PROPERTY_ROW_DATA, row);
 		} else {
 			rowProxy = (TableViewRowProxy) row;
 		}
@@ -326,13 +430,14 @@ public class TableViewProxy extends TiViewProxy
 	}
 
 	public void updateView() {
-		AsyncResult result = new AsyncResult();
-		Message msg = getUIHandler().obtainMessage(MSG_UPDATE_VIEW);
-		msg.obj = result;
-		msg.sendToTarget();
-		result.getResult();
+		if (getTiContext().isUIThread()) {
+			getTableView().updateView();
+			return;
+		}
+		sendBlockingUiMessage(MSG_UPDATE_VIEW, null);
 	}
 
+	@Kroll.method
 	public void scrollToIndex(int index) {
 		Message msg = getUIHandler().obtainMessage(MSG_SCROLL_TO_INDEX);
 		msg.arg1 = index;
@@ -348,6 +453,29 @@ public class TableViewProxy extends TiViewProxy
 		} else if (msg.what == MSG_SCROLL_TO_INDEX) {
 			getTableView().scrollToIndex(msg.arg1);
 			return true;
+		} else if (msg.what == MSG_SET_DATA) {
+			AsyncResult result = (AsyncResult) msg.obj;
+			Object[] data = (Object[]) result.getArg();
+			handleSetData(data);
+			result.setResult(0);
+			return true;
+		} else if (msg.what == MSG_INSERT_ROW) {
+			AsyncResult result = (AsyncResult) msg.obj;
+			if (msg.arg1 == INSERT_ROW_AFTER) {
+				handleInsertRowAfter(msg.arg2, result.getArg());
+			} else {
+				handleInsertRowBefore(msg.arg2, result.getArg());
+			}
+			result.setResult(0);
+			return true;
+		} else if (msg.what == MSG_APPEND_ROW) {
+			AsyncResult result = (AsyncResult) msg.obj;
+			handleAppendRow(result.getArg());
+			result.setResult(0);
+			return true;
+		} else if (msg.what == MSG_DELETE_ROW) {
+			handleDeleteRow(msg.arg1);
+			return true;
 		}
 
 		return super.handleMessage(msg);
@@ -357,9 +485,9 @@ public class TableViewProxy extends TiViewProxy
 	// labels only send out click events when they are explicitly told to do so.
 	// we need to tell each label child to enable clicks when a click listener is added
 	@Override
-	public void eventListenerAdded(String eventName, int count, TiProxy proxy) {
+	public void eventListenerAdded(String eventName, int count, KrollProxy proxy) {
 		super.eventListenerAdded(eventName, count, proxy);
-		if (eventName.equals("click") && proxy == this) {
+		if (eventName.equals(TiC.EVENT_CLICK) && proxy == this) {
 			for (TableViewSectionProxy section : getSections()) {
 				for (TableViewRowProxy row : section.getRows()) {
 					row.setLabelsClickable(true);
@@ -369,9 +497,9 @@ public class TableViewProxy extends TiViewProxy
 	}
 	
 	@Override
-	public void eventListenerRemoved(String eventName, int count, TiProxy proxy) {
+	public void eventListenerRemoved(String eventName, int count, KrollProxy proxy) {
 		super.eventListenerRemoved(eventName, count, proxy);
-		if (eventName.equals("click") && count == 0 && proxy == this) {
+		if (eventName.equals(TiC.EVENT_CLICK) && count == 0 && proxy == this) {
 			for (TableViewSectionProxy section : getSections()) {
 				for (TableViewRowProxy row : section.getRows()) {
 					row.setLabelsClickable(false);

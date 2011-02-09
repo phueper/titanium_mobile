@@ -28,7 +28,7 @@ import java.util.TreeSet;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
-import org.apache.http.entity.FileEntity;
+import org.appcelerator.titanium.TiContext;
 
 import android.content.Context;
 import android.content.res.AssetManager;
@@ -36,6 +36,8 @@ import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
+import android.net.Uri;
+import android.os.Environment;
 import android.webkit.URLUtil;
 
 public class TiFileHelper
@@ -64,6 +66,11 @@ public class TiFileHelper
 	{
 		softContext = new SoftReference<Context>(context);
 		this.nph = new TiNinePatchHelper();
+		if (resourcePathCache == null) {
+			resourcePathCache = new HashSet<String>();
+			foundResourcePathCache = new HashSet<String>();
+			notFoundResourcePathCache = new HashSet<String>();
+		}
 
 		if (resourcePathCache == null) {
 			resourcePathCache = new HashSet<String>();
@@ -216,17 +223,41 @@ public class TiFileHelper
 		return is;
 	}
 
-	public Drawable loadDrawable(String path, boolean report) {
+	private Drawable loadDrawable(String path, boolean report) {
 		return loadDrawable(path, report, false);
 	}
+	
+	public Drawable loadDrawable(TiContext tiContext, String path, boolean report) {
+		return loadDrawable(tiContext, path, report, false);
+	}
+	
+	public Drawable loadDrawable(TiContext context, String path, boolean report, boolean checkForNinePatch)
+	{
+		if (context == null) {
+			return loadDrawable(path, report, checkForNinePatch);
+		}
+		
+		// getResourceDrawable wants a resolved url
+		String url = path;
+		if (!url.startsWith("file:")) {
+			url = context.resolveUrl(path);
+		}
+		Drawable d = TiUIHelper.getResourceDrawable(context, url);
+		if (d != null) {
+			return d;
+		}
+		
+		return loadDrawable(url, report, checkForNinePatch);
+		
+	}
 
-	public Drawable loadDrawable(String path, boolean report, boolean checkForNinePatch)
+	private Drawable loadDrawable(String path, boolean report, boolean checkForNinePatch)
 	{
 		Drawable d = null;
 		InputStream is = null;
 		try
 		{
-			if (checkForNinePatch) {
+			if (checkForNinePatch && path != null && !URLUtil.isNetworkUrl(path)) {
 				if (path.endsWith(".png")) {
 					if (!path.endsWith(".9.png")) {
 						String apath = null;
@@ -281,8 +312,9 @@ public class TiFileHelper
 			} else {
 				is = openInputStream(path, report);
 				Bitmap b = TiUIHelper.createBitmap(is);
-				d = new BitmapDrawable(b);
-				//d = Drawable.createFromStream(is, path);
+				if (b != null) {
+					d = new BitmapDrawable(b);
+				}
 			}
 		} catch (IOException e) {
 			Log.i(LCAT, path + " not found.");
@@ -578,7 +610,8 @@ public class TiFileHelper
 			}
 			else
 			{
-				f = new File("/sdcard/" + context.getPackageName());
+				File storageDir = Environment.getExternalStorageDirectory();
+				f = new File(storageDir, context.getPackageName());
 				if (!f.exists())
 				{
 					f.mkdirs();

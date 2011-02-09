@@ -13,7 +13,6 @@ var data = [
 	{title:'JS Includes', hasChild:true, test:'../examples/js_include.js'},
 	{title:'Set Timeout (timer)', hasChild:true, test:'../examples/set_timeout.js'},
 	{title:'Set Interval (timer)', hasChild:true, test:'../examples/set_interval.js'},
-	{title:'XML DOM', hasChild:true, test:'../examples/xml_dom.js'},
 	{title:'XML RSS', hasChild:true, test:'../examples/xml_rss.js'},
 	{title:'Utils', hasChild:true, test:'../examples/utils.js'},
 	{title:'JSON', hasChild:true, test:'../examples/json.js'},
@@ -27,6 +26,10 @@ if (Titanium.Platform.name == 'iPhone OS')
 	data.push({title:'Passing Data (windows)', hasChild:true, test:'../examples/custom_properties.js'});
 	data.push({title:'Bonjour', hasChild:true, test:'../examples/bonjour.js'});
 	data.push({title:'Sockets', hasChild:true, test:'../examples/sockets.js'});
+}
+
+if (Titanium.Platform.osname === 'android') {
+	data.push({title: 'Android services', hasChild:true, test:'../examples/android_services.js'});
 }
 
 // create table view

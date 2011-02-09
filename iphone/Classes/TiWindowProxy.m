@@ -258,11 +258,15 @@ END_UI_THREAD_PROTECTED_VALUE(opened)
 -(void)_tabFocus
 {
 	focused = YES;
-	[[[TiApp app] controller] windowFocused:[self controller]];
+	[self willShow];
+	if (!navWindow) {
+		[[[TiApp app] controller] windowFocused:[self controller]];
+	}
 }
 
 -(void)_tabBlur
 {
+	[self willHide];
 	focused = NO;
 }
 
@@ -352,7 +356,6 @@ END_UI_THREAD_PROTECTED_VALUE(opened)
 	// false to delay for some other action
 	if ([self _handleOpen:args])
 	{
-		
 		// ensure on open that we've created our view before we start to use it
 		[self view];
 		[self windowWillOpen];
@@ -407,7 +410,7 @@ END_UI_THREAD_PROTECTED_VALUE(opened)
 			}
 #if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_3_2
 			style = [TiUtils intValue:@"modalStyle" properties:dict def:-1];
-			if (style!=-1)
+			if (style!=-1 && [nc respondsToSelector:@selector(setModalPresentationStyle:)])
 			{
 				// modal transition style page curl must be done only in fullscreen
 				// so only allow if not page curl
@@ -420,7 +423,7 @@ END_UI_THREAD_PROTECTED_VALUE(opened)
 #endif			
 			[self setController:wc];
 			[self setNavController:nc];
-			BOOL animated = args!=nil && [args isKindOfClass:[NSDictionary class]] ? [TiUtils boolValue:@"animated" properties:[args objectAtIndex:0] def:YES] : YES;
+			BOOL animated = [TiUtils boolValue:@"animated" properties:dict def:YES];
 			[self setupWindowDecorations];
 			
 			if (rootViewAttached==NO)
@@ -629,7 +632,7 @@ END_UI_THREAD_PROTECTED_VALUE(opened)
 	
 	UIView *rootView = [[TiApp app] controller].view;
 	
-	TiUIView *view = [self view];
+	TiUIView *view_ = [self view];
 	
 	if (![self _isChildOfTab])
 	{
@@ -640,7 +643,7 @@ END_UI_THREAD_PROTECTED_VALUE(opened)
 			tempController.view = rootView;
 			[[self _window] addSubview:rootView];
 		}
-		[rootView addSubview:view];
+		[rootView addSubview:view_];
 		
 		[self controller];
 
@@ -650,7 +653,7 @@ END_UI_THREAD_PROTECTED_VALUE(opened)
 
 	[self layoutChildren:YES];
 
-	[rootView bringSubviewToFront:view];
+	[rootView bringSubviewToFront:view_];
 
 	// make sure the splash is gone
 	[[TiApp app] hideSplash:nil];

@@ -27,6 +27,7 @@
     TiDimension topCap;
     BOOL recapStretchableImage;
 	BOOL isLocalImage;
+	BOOL hires;
 }
 
 @property(nonatomic,readwrite,retain) UIImage * fullImage;
@@ -34,6 +35,7 @@
 @property(nonatomic,readwrite) TiDimension leftCap;
 @property(nonatomic,readwrite) TiDimension topCap;
 @property(nonatomic,readwrite) BOOL isLocalImage;
+@property(nonatomic,readwrite) BOOL hires;
 -(UIImage *)imageForSize:(CGSize)imageSize;
 -(UIImage *)stretchableImage;
 
@@ -42,7 +44,7 @@
 @end
 
 @implementation ImageCacheEntry
-@synthesize fullImage, recentlyResizedImage, leftCap, topCap, isLocalImage;
+@synthesize fullImage, recentlyResizedImage, leftCap, topCap, isLocalImage, hires;
 
 -(void)ensureFullImageForUrl:(NSURL *)url
 {
@@ -106,9 +108,10 @@
 	CGInterpolationQuality quality = kCGInterpolationDefault;
 
 	[self setRecentlyResizedImage:[UIImageResize
-			resizedImage:imageSize
-			interpolationQuality:quality
-			image:fullImage]];
+								   resizedImage:imageSize
+								   interpolationQuality:quality
+								   image:fullImage
+								   hires:hires]];
 	return recentlyResizedImage;
 }
 
@@ -266,7 +269,7 @@ DEFINE_EXCEPTIONS
 {
 	if (self = [super init])
 	{
-		WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+		WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
 		[[NSNotificationCenter defaultCenter] addObserver:self
 												 selector:@selector(didReceiveMemoryWarning:)
 													 name:UIApplicationDidReceiveMemoryWarningNotification  
@@ -278,7 +281,7 @@ DEFINE_EXCEPTIONS
 
 -(void)dealloc
 {
-	WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+	WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
 	[[NSNotificationCenter defaultCenter] removeObserver:self
 													name:UIApplicationDidReceiveMemoryWarningNotification  
 												  object:nil];  
@@ -417,7 +420,7 @@ DEFINE_EXCEPTIONS
 				}
 			}
 #endif
-			result = [self setImage:resultImage forKey:urlString];
+			result = [self setImage:resultImage forKey:urlString cache:NO];
 			[result setIsLocalImage:YES];
 		}
 		else
@@ -678,9 +681,22 @@ DEFINE_EXCEPTIONS
 		
 		UIImage *image = [UIImage imageWithData:data];
 		
+		if (image == nil) 
+		{
+			NSMutableDictionary* errorDetail = [NSMutableDictionary dictionary];
+			[errorDetail setValue:@"Returned invalid image data" forKey:NSLocalizedDescriptionKey];
+			NSError* error = [NSError errorWithDomain:@"com.appcelerator.titanium.imageloader" code:1 userInfo:errorDetail];
+			[[req delegate] imageLoadFailed:req error:error];
+			[request setUserInfo:nil];
+			[request release];
+			return;
+		}
+		
 		if (cacheable)
 		{
+			BOOL hires = [TiUtils boolValue:[[req userInfo] valueForKey:@"hires"] def:NO];
 			[self cache:image forURL:[request url]];
+			[[self entryForKey:[request url]] setHires:hires];
 		}
 		
 		[self notifyImageCompleted:[NSArray arrayWithObjects:req,image,nil]];

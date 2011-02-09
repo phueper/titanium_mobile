@@ -32,7 +32,7 @@ NSArray * tableKeySequence;
 {
 	if (tableKeySequence == nil)
 	{
-		tableKeySequence = [[NSArray arrayWithObjects:@"style",@"search",@"data",nil] retain];
+		tableKeySequence = [[NSArray arrayWithObjects:@"style",@"search",@"data",@"backgroundColor",nil] retain];
 	}
 	return tableKeySequence;
 }
@@ -69,25 +69,9 @@ NSArray * tableKeySequence;
 	return row;
 }
 
--(NSMutableArray*)sections
-{
-	NSMutableArray *sections;
-	@synchronized(self)
-	{
-		sections = [self valueForKey:@"data"];
-		if (sections == nil)
-		{
-			sections = [NSMutableArray array];
-			[self replaceValue:sections forKey:@"data" notification:YES];
-		}
-		[[sections retain] autorelease];
-	}
-	return sections;
-}
-
 -(TiUITableViewSectionProxy*)sectionForIndex:(NSInteger)index row:(TiUITableViewRowProxy**)rowOut
 {
-	NSMutableArray *sections = [self sections];
+	NSArray *sections = [self data];
 	int current = 0;
 	int row = index;
 	int sectionIdx = 0;
@@ -191,7 +175,7 @@ NSArray * tableKeySequence;
 	TiUITableViewRowProxy *newrow = [self tableRowFromArg:data];
 	TiUITableView *table = [self viewInitialized]?[self tableView]:nil;
 	
-	NSMutableArray *sections = [self valueForKey:@"data"];
+	NSArray *sections = [self data];
 	
 	int current = 0;
 	int row = index;
@@ -235,7 +219,7 @@ NSArray * tableKeySequence;
         [newrow updateRow:data withObject:anim];
     }
 	
-	TiUITableViewAction *action = [[[TiUITableViewAction alloc] initWithRow:newrow animation:anim section:-1 type:TiUITableViewActionUpdateRow] autorelease];
+	TiUITableViewAction *action = [[[TiUITableViewAction alloc] initWithObject:newrow animation:anim type:TiUITableViewActionUpdateRow] autorelease];
 	[table dispatchAction:action];
 }
 
@@ -247,7 +231,7 @@ NSArray * tableKeySequence;
 	NSDictionary *anim = [args count] > 1 ? [args objectAtIndex:1] : nil;
 	
 	
-	NSMutableArray *sections = [self valueForKey:@"data"];
+	NSArray *sections = [self data];
 	
 	if ([sections count]==0)
 	{
@@ -267,7 +251,7 @@ NSArray * tableKeySequence;
 	if ([self viewInitialized])
 	{
 		TiUITableView *table = [self tableView];
-		TiUITableViewAction *action = [[[TiUITableViewAction alloc] initWithRow:row animation:anim section:section.section type:TiUITableViewActionDeleteRow] autorelease];
+		TiUITableViewAction *action = [[[TiUITableViewAction alloc] initWithObject:row animation:anim type:TiUITableViewActionDeleteRow] autorelease];
 		[table dispatchAction:action];
 	}
 	else
@@ -292,7 +276,7 @@ NSArray * tableKeySequence;
 	
 	TiUITableView *table = [self viewInitialized]?[self tableView]:nil;
 	
-	NSMutableArray *sections = [self valueForKey:@"data"];
+	NSArray *sections = [self data];
 	if ([sections count]==0)
 	{
 		[self throwException:@"invalid number of rows" subreason:nil location:CODELOCATION];
@@ -317,21 +301,21 @@ NSArray * tableKeySequence;
         [newSection replaceValue:header forKey:@"headerTitle" notification:NO];
         
         // Set up the new section
-        newSection.section = section.section;
         newSection.table = table;
         newSection.parent = [table proxy];
         
-        // Insert the new section into the array - but, exactly WHERE we insert it depends on
-        // whether or not we're inserting before the first row of a section.
+        // Insert the new section into the array - but, exactly WHERE we insert depends.
         int sectionIndex = [sections indexOfObject:section];
         if (row.row != 0) {
             sectionIndex++;
         }
-        [sections insertObject:newSection atIndex:sectionIndex];
         
+		// Set the section index here, so that it goes in the right place
+		newSection.section = sectionIndex;
+		
         // Thanks to how we track sections, we also need to manually update the index
-        // of each section in the array after the insert.
-        for (int i=sectionIndex+1; i < [sections count]; i++) {
+        // of each section in the array after where the insert will be.
+        for (int i=sectionIndex; i < [sections count]; i++) {
             TiUITableViewSectionProxy *updateSection = [sections objectAtIndex:i];
             updateSection.section = updateSection.section + 1;
         }
@@ -339,7 +323,7 @@ NSArray * tableKeySequence;
         // Configure the new row
         newrow.section = newSection;
         newrow.parent = newSection;      
-        newrow.row = (row.row == 0) ? 0 : row.row - 1; // HACK: Used to determine the row we're being placed after in the previous section; will be set to 0 later
+        newrow.row = row.row; // HACK: Used to determine the row we're being placed before in the old section
         
         // Configure the action
         actionType = TiUITableViewActionInsertSectionBefore;
@@ -354,7 +338,7 @@ NSArray * tableKeySequence;
 	
 	if(table != nil)
 	{
-		TiUITableViewAction *action = [[[TiUITableViewAction alloc] initWithRow:newrow animation:anim section:actionSection.section type:actionType] autorelease];
+		TiUITableViewAction *action = [[[TiUITableViewAction alloc] initWithObject:newrow animation:anim type:actionType] autorelease];
 		[table dispatchAction:action];
 	}
 	else
@@ -376,7 +360,7 @@ NSArray * tableKeySequence;
 
 	TiUITableView *table = [self viewInitialized]?[self tableView]:nil;
 	
-	NSMutableArray *sections = [self valueForKey:@"data"];
+	NSArray *sections = [self data];
 	if ([sections count]==0)
 	{
 		[self throwException:@"invalid number of rows" subreason:nil location:CODELOCATION];
@@ -407,11 +391,10 @@ NSArray * tableKeySequence;
         
         // Insert the new section into the array
         int sectionIndex = [sections indexOfObject:section] + 1;
-        [sections insertObject:newSection atIndex:sectionIndex];
         
         // Thanks to how we track sections, we also need to manually update the index
-        // of each section in the array after the insert.
-        for (int i=sectionIndex+1; i < [sections count]; i++) {
+        // of each section in the array after where the insert will be.
+        for (int i=sectionIndex; i < [sections count]; i++) {
             TiUITableViewSectionProxy *updateSection = [sections objectAtIndex:i];
             updateSection.section = updateSection.section + 1;
         }
@@ -434,7 +417,7 @@ NSArray * tableKeySequence;
 
 	if (table != nil)
 	{
-		TiUITableViewAction *action = [[[TiUITableViewAction alloc] initWithRow:newrow animation:anim section:actionSection.section type:actionType] autorelease];
+		TiUITableViewAction *action = [[[TiUITableViewAction alloc] initWithObject:newrow animation:anim type:actionType] autorelease];
 		[table dispatchAction:action];
 	}
 	else
@@ -457,7 +440,7 @@ NSArray * tableKeySequence;
 
 	TiUITableView *table = [self viewInitialized]?[self tableView]:nil;
 
-	NSMutableArray *sections = [self valueForKey:@"data"];
+	NSArray *sections = [self data];
 	if (sections == nil || [sections count]==0)
 	{
 		[self setData:[NSArray arrayWithObject:data] withObject:anim];
@@ -467,24 +450,22 @@ NSArray * tableKeySequence;
 	{
         id header = [row valueForKey:@"header"];
         TiUITableViewActionType actionType = TiUITableViewActionAppendRow;
+		TiUITableViewSectionProxy* section = [sections lastObject];
         if (header != nil) {
-            TiUITableViewSectionProxy *newSection = [[[TiUITableViewSectionProxy alloc] _initWithPageContext:[self executionContext] args:nil] autorelease];
-			[newSection replaceValue:header forKey:@"headerTitle" notification:NO];
+            section = [[[TiUITableViewSectionProxy alloc] _initWithPageContext:[self executionContext] args:nil] autorelease];
+			[section replaceValue:header forKey:@"headerTitle" notification:NO];
 			
-            newSection.section = [sections count];
-            newSection.table = table;
-			newSection.parent = [table proxy];
-
-            [sections addObject:newSection];
+            section.section = [sections count];
+            section.table = table;
+			section.parent = [table proxy];
             
             actionType = TiUITableViewActionAppendRowWithSection;
         }
-		TiUITableViewSectionProxy *section = [sections lastObject];
 		row.section = section;
 		row.parent = section;
 		
 		if(table != nil){
-			TiUITableViewAction *action = [[[TiUITableViewAction alloc] initWithRow:row animation:anim section:row.section.section type:actionType] autorelease];
+			TiUITableViewAction *action = [[[TiUITableViewAction alloc] initWithObject:row animation:anim type:actionType] autorelease];
 			[table dispatchAction:action];
 		}
 		else
@@ -492,11 +473,6 @@ NSArray * tableKeySequence;
 		//No table, we have to do the data update ourselves.
 			[section add:row];
 		}
-        
-        // Have to do this after the action or else there's an update of a nonexistant section
-        if (header != nil) {
-			[section replaceValue:header forKey:@"headerTitle" notification:NO];
-        }
 	}	
 }
 
@@ -570,9 +546,7 @@ NSArray * tableKeySequence;
 		}
 	}
 	
-	[self replaceValue:data forKey:@"data" notification:NO];
-	
-	TiUITableViewAction *action = [[[TiUITableViewAction alloc] initWithRow:nil animation:properties section:0 type:TiUITableViewActionSetData] autorelease];
+	TiUITableViewAction *action = [[[TiUITableViewAction alloc] initWithObject:data animation:properties type:TiUITableViewActionSetData] autorelease];
 	[self makeViewPerformSelector:@selector(dispatchAction:) withObject:action createIfNeeded:YES waitUntilDone:NO];
 }
 
@@ -580,6 +554,15 @@ NSArray * tableKeySequence;
 {
 	// if you pass in no args, it's a non animation set
 	[self setData:args withObject:[NSDictionary dictionaryWithObject:NUMINT(UITableViewRowAnimationNone) forKey:@"animationStyle"]];
+}
+
+-(NSArray*)data
+{
+	// viewAttached now checks for windowOpened in addition to attachment, so we have to check just the view here
+	if (view == nil) {
+		return nil;
+	}
+	return [(TiUITableView*)[self view] sections];
 }
 
 -(void)setContentInsets:(id)args

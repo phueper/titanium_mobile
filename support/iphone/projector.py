@@ -152,6 +152,8 @@ class Projector(object):
 		content = content.replace('PRODUCT_NAME = %s'%self.namespace,'PRODUCT_NAME = "%s"'%self.name)
 		content = content.replace('PRODUCT_NAME = %s-iPad'%self.namespace,'PRODUCT_NAME = "%s"'%self.name)
 		content = content.replace('PRODUCT_NAME = "%s-iPad"'%self.namespace,'PRODUCT_NAME = "%s"'%self.name)
+		content = content.replace('PRODUCT_NAME = %s-universal'%self.namespace,'PRODUCT_NAME = "%s"'%self.name)
+		content = content.replace('PRODUCT_NAME = "%s-universal"'%self.namespace,'PRODUCT_NAME = "%s"'%self.name)		
 		content = content.replace('Resources-iPad','Resources')
 		content = content.replace('%s.app'%self.namespace,'%s.app'%self.name)
 		content = content.replace('path = %s_Prefix.pch;'%self.namespace,'path = "%s_Prefix.pch";'%self.name)
@@ -187,7 +189,7 @@ class Projector(object):
 		# we do special processing here
 		c = open(src_xcode_proj).read()
 		c = self.process_xcode(c)
-		f = open(os.path.join(out_dir,'%s.xcodeproj'%self.name,'project.pbxproj'),'w')
+		f = codecs.open(os.path.join(out_dir,'%s.xcodeproj'%self.name,'project.pbxproj'),'w',encoding='utf-8')
 		f.write(c)
 		f.close()
 		

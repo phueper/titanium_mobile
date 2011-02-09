@@ -31,9 +31,7 @@
 		textWidgetView = [[UITextView alloc] initWithFrame:CGRectMake(0, 0, 100, 100)];
 		((UITextView *)textWidgetView).delegate = self;
 		[self addSubview:textWidgetView];
-		WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillHide:) name:UIKeyboardWillHideNotification object:nil];
-		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillShow:) name:UIKeyboardWillShowNotification object:nil];
+		WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
 	}
 	return textWidgetView;
 }
@@ -48,6 +46,11 @@
 -(void)setEditable_:(id)editable
 {
 	[(UITextView *)[self textWidgetView] setEditable:[TiUtils boolValue:editable]];
+}
+
+-(void)setAutoLink_:(id)type_
+{
+	[(UITextView *)[self textWidgetView] setDataDetectorTypes:[TiUtils intValue:type_ def:UIDataDetectorTypeNone]];
 }
 
 -(void)setBorderStyle_:(id)value
@@ -86,28 +89,21 @@
 
 - (void)textViewDidBeginEditing:(UITextView *)tv
 {
-	if ([self.proxy _hasListeners:@"focus"])
-	{
-		[self.proxy fireEvent:@"focus" withObject:[NSDictionary dictionaryWithObject:[(UITextView *)textWidgetView text] forKey:@"value"] propagate:NO];
-	}
+	[self textWidget:tv didFocusWithText:[tv text]];
 }
 
 - (void)textViewDidEndEditing:(UITextView *)tv
 {
+	NSString * text = [(UITextView *)textWidgetView text];
+
 	if (returnActive && [self.proxy _hasListeners:@"return"])
 	{
-		[self.proxy fireEvent:@"return" withObject:[NSDictionary dictionaryWithObject:[(UITextView *)textWidgetView text] forKey:@"value"]];
+		[self.proxy fireEvent:@"return" withObject:[NSDictionary dictionaryWithObject:text forKey:@"value"]];
 	}	
 
 	returnActive = NO;
 
-	if ([self.proxy _hasListeners:@"blur"])
-	{
-		[self.proxy fireEvent:@"blur" withObject:[NSDictionary dictionaryWithObject:[(UITextView *)textWidgetView text] forKey:@"value"] propagate:NO];
-	}
-	
-	// In order to capture gestures properly, we need to force the root view to become the first responder.
-	[[[[TiApp app] controller] view] becomeFirstResponder];
+	[self textWidget:tv didBlurWithText:text];
 }
 
 - (void)textViewDidChange:(UITextView *)tv

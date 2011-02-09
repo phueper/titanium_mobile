@@ -127,14 +127,14 @@ USE_VIEW_FOR_AUTO_WIDTH
 
 -(void)repaint:(id)unused
 {
-	[self setNeedsReposition];
+	[self contentsWillChange];
 }
 
 -(void)windowDidClose
 {
 	[self _destroy];
 	NSNotification *notification = [NSNotification notificationWithName:kTiContextShutdownNotification object:self];
-	WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+	WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
 	[[NSNotificationCenter defaultCenter] postNotification:notification];
 	[super windowDidClose];
 }
@@ -178,12 +178,14 @@ USE_VIEW_FOR_AUTO_WIDTH
 	[(TiUIWebView*)[self view] fireEvent:listener withObject:obj remove:yn thisObject:thisObject_];
 }
 
-- (id)preloadForKey:(id)key
+- (id)preloadForKey:(id)key name:(id)name
 {
+	return nil;
 }
 
 - (KrollContext*)krollContext
 {
+	return nil;
 }
 
 - (void)registerProxy:(id)proxy
@@ -197,6 +199,11 @@ USE_VIEW_FOR_AUTO_WIDTH
 -(void)evalJSWithoutResult:(NSString*)code
 {
 	[self evalJS:code];
+}
+
+- (NSString*)basename
+{
+	return nil;
 }
 
 

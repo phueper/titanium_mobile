@@ -6,16 +6,14 @@
  */
 package ti.modules.titanium.ui;
 
-import java.lang.ref.WeakReference;
-import java.util.ArrayList;
-
 import org.appcelerator.titanium.TiApplication;
-import org.appcelerator.titanium.TiContext;
+import org.appcelerator.titanium.TiC;
 import org.appcelerator.titanium.TiRootActivity;
 import org.appcelerator.titanium.util.Log;
 import org.appcelerator.titanium.util.TiConfig;
 import org.appcelerator.titanium.view.ITiWindowHandler;
 import org.appcelerator.titanium.view.TiCompositeLayout;
+import org.appcelerator.titanium.view.TiCompositeLayout.LayoutArrangement;
 import org.appcelerator.titanium.view.TiCompositeLayout.LayoutParams;
 
 import android.app.ActivityGroup;
@@ -54,93 +52,101 @@ public class TiTabActivity extends ActivityGroup
 
 		Intent intent = getIntent();
 
-        boolean fullscreen = false;
-        boolean navbar = false;
-        Messenger messenger = null;
-        Integer messageId = null;
-        boolean vertical = false;
+		boolean fullscreen = false;
+		boolean navbar = false;
+		Messenger messenger = null;
+		Integer messageId = null;
+		String arrangementFromIntent =  "";
 
-        if (intent != null) {
-        	if (intent.hasExtra("fullscreen")) {
-        		fullscreen = intent.getBooleanExtra("fullscreen", fullscreen);
-        	}
-        	if (intent.hasExtra("navBarHidden")) {
-        		navbar = !intent.getBooleanExtra("navBarHidden", navbar);
-        	}
-        	if (intent.hasExtra("messenger")) {
-        		messenger = (Messenger) intent.getParcelableExtra("messenger");
-        		messageId = intent.getIntExtra("messageId", -1);
-        	}
-        	if (intent.hasExtra("vertical")) {
-        		vertical = intent.getBooleanExtra("vertical", vertical);
-        	}
-        }
+		if (intent != null) {
+			if (intent.hasExtra(TiC.PROPERTY_FULLSCREEN)) {
+				fullscreen = intent.getBooleanExtra(TiC.PROPERTY_FULLSCREEN, fullscreen);
+			}
+			if (intent.hasExtra(TiC.PROPERTY_NAV_BAR_HIDDEN)) {
+				navbar = !intent.getBooleanExtra(TiC.PROPERTY_NAV_BAR_HIDDEN, navbar);
+			}
+			if (intent.hasExtra(TiC.INTENT_PROPERTY_MESSENGER)) {
+				messenger = (Messenger) intent.getParcelableExtra(TiC.INTENT_PROPERTY_MESSENGER);
+				messageId = intent.getIntExtra(TiC.INTENT_PROPERTY_MSG_ID, -1);
+			}
+			if (intent.hasExtra(TiC.INTENT_PROPERTY_LAYOUT)) {
+				arrangementFromIntent = intent.getStringExtra(TiC.INTENT_PROPERTY_LAYOUT);
+			}
+		}
+		LayoutArrangement arrangement = LayoutArrangement.DEFAULT;
+		if (arrangementFromIntent.equals(TiC.LAYOUT_HORIZONTAL)) {
+			arrangement = LayoutArrangement.HORIZONTAL;
+		} else if (arrangementFromIntent.equals(TiC.LAYOUT_VERTICAL)) {
+			arrangement = LayoutArrangement.VERTICAL;
+		}
+		layout = new TiCompositeLayout(this, arrangement);
 
-        layout = new TiCompositeLayout(this, vertical);
+		if (fullscreen) {
+			getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
+					WindowManager.LayoutParams.FLAG_FULLSCREEN);
+		}
 
-        if (fullscreen) {
-        	getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
-                    WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        }
+		if (navbar) {
+			this.requestWindowFeature(Window.FEATURE_LEFT_ICON); // TODO Keep?
+			this.requestWindowFeature(Window.FEATURE_RIGHT_ICON);
+			this.requestWindowFeature(Window.FEATURE_PROGRESS);
+			this.requestWindowFeature(Window.FEATURE_INDETERMINATE_PROGRESS);
+		} else {
+			this.requestWindowFeature(Window.FEATURE_NO_TITLE);
+		}
 
-        if (navbar) {
-        	this.requestWindowFeature(Window.FEATURE_LEFT_ICON); // TODO Keep?
-	        this.requestWindowFeature(Window.FEATURE_RIGHT_ICON);
-	        this.requestWindowFeature(Window.FEATURE_PROGRESS);
-	        this.requestWindowFeature(Window.FEATURE_INDETERMINATE_PROGRESS);
-        } else {
-           	this.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        }
+		setContentView(layout);
 
-        setContentView(layout);
-
-        //Notify caller that onCreate is done. Use post
-        // to prevent deadlock.
-        final TiTabActivity me = this;
-        final Messenger fMessenger = messenger;
-        final int fMessageId = messageId;
-        handler.post(new Runnable(){
+		// Notify caller that onCreate is done. Use post
+		// to prevent deadlock.
+		final TiTabActivity me = this;
+		final Messenger fMessenger = messenger;
+		final int fMessageId = messageId;
+		handler.post(new Runnable() {
 			@Override
 			public void run() {
-		        if (fMessenger != null) {
-		        	try {
-			        	Message msg = Message.obtain();
-			        	msg.what = fMessageId;
-			        	msg.obj = me;
-			        	if(fMessenger.getBinder().pingBinder()) {
-			        		fMessenger.send(msg);
-				        	Log.w(LCAT, "Notifying TiTabGroup, activity is created");
-			        	} else {
-			        		me.finish();
-			        	}
-		        	} catch (RemoteException e) {
-		        		Log.e(LCAT, "Unable to message creator. finishing.");
-		        		me.finish();
-		        	} catch (RuntimeException e) {
-		        		Log.w(LCAT, "Run-time exception: " + e.getMessage(), e);
-		        	}
-		        }
+				if (fMessenger != null) {
+					try {
+						Message msg = Message.obtain();
+						msg.what = fMessageId;
+						msg.obj = me;
+						if (fMessenger.getBinder().pingBinder()) {
+							fMessenger.send(msg);
+							Log.w(LCAT, "Notifying TiTabGroup, activity is created");
+						} else {
+							me.finish();
+						}
+					} catch (RemoteException e) {
+						Log.e(LCAT, "Unable to message creator. finishing.");
+						me.finish();
+					} catch (RuntimeException e) {
+						Log.w(LCAT, "Run-time exception: " + e.getMessage(), e);
+					}
+				}
 			}
 		});
 		
 	}
 
-    public TiApplication getTiApp() {
-    	return (TiApplication) getApplication();
-    }
+	public TiApplication getTiApp()
+	{
+		return (TiApplication) getApplication();
+	}
 
-    public TiCompositeLayout getLayout() {
-    	return layout;
-    }
-
+	public TiCompositeLayout getLayout()
+	{
+		return layout;
+	}
 
 	@Override
-	public void addWindow(View v, LayoutParams params) {
+	public void addWindow(View v, LayoutParams params)
+	{
 		layout.addView(v, params);
 	}
 
 	@Override
-	public void removeWindow(View v) {
+	public void removeWindow(View v)
+	{
 		layout.removeView(v);
 	}
 
@@ -149,7 +155,7 @@ public class TiTabActivity extends ActivityGroup
 	{
 		Intent intent = getIntent();
 		if (intent != null) {
-			if (intent.getBooleanExtra("finishRoot", false)) {
+			if (intent.getBooleanExtra(TiC.INTENT_PROPERTY_FINISH_ROOT, false)) {
 				if (getApplication() != null) {
 					TiApplication tiApp = getTiApp();
 					if (tiApp != null) {
@@ -166,20 +172,20 @@ public class TiTabActivity extends ActivityGroup
 	}
 
 	@Override
-	protected void onPause() {
+	protected void onPause()
+	{
 		super.onPause();
 		getTiApp().setWindowHandler(null);
 		((TiApplication) getApplication()).setCurrentActivity(this, null);
 	}
 
 	@Override
-	protected void onResume() {
+	protected void onResume()
+	{
 		super.onResume();
 		getTiApp().setWindowHandler(this);
 		((TiApplication) getApplication()).setCurrentActivity(this, this);
 	}
-
-
 
 	@Override
 	protected void onDestroy()
@@ -196,5 +202,4 @@ public class TiTabActivity extends ActivityGroup
 		
 		handler = null;
 	}
-
 }

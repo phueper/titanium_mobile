@@ -37,6 +37,7 @@
 {
 	NSCondition *lock;
 	TiUIWindowProxy* window;
+	id args;
 	BOOL completed;
 	BOOL timeout;
 }
@@ -44,11 +45,12 @@
 
 @implementation TiUIWindowProxyLatch
 
--(id)initWithWindow:(id)window_
+-(id)initWithWindow:(id)window_ args:(id)args_
 {
 	if (self = [super init])
 	{
 		window = [window_ retain];
+		args = [args_ retain];
 		lock = [[NSCondition alloc] init];
 	}
 	return self;
@@ -58,6 +60,7 @@
 {
 	RELEASE_TO_NIL(lock);
 	RELEASE_TO_NIL(window);
+	RELEASE_TO_NIL(args);
 	[super dealloc];
 }
 
@@ -68,7 +71,7 @@
 	[lock signal];
 	if (timeout)
 	{
-		[window boot:YES];
+		[window boot:YES args:args];
 	}
 	[lock unlock];
 }
@@ -118,7 +121,7 @@
 	[super _destroy];
 }
 
--(void)boot:(BOOL)timeout
+-(void)boot:(BOOL)timeout args:args
 {
 	RELEASE_TO_NIL(latch);
 	contextReady = YES;
@@ -131,9 +134,14 @@
 	{
 		if (timeout)
 		{
-			[self open:nil];
+			[self open:args];
 		}
 	}
+}
+
+-(NSMutableDictionary*)langConversionTable
+{
+	return [NSMutableDictionary dictionaryWithObjectsAndKeys:@"title",@"titleid",@"titlePrompt",@"titlepromptid",nil];
 }
 
 #pragma mark Public
@@ -170,12 +178,13 @@
 				[self _setBaseURL:url];
 				contextReady=NO;
 				context = [[KrollBridge alloc] initWithHost:[self _host]];
-				NSDictionary *preload = [NSDictionary dictionaryWithObjectsAndKeys:self,@"currentWindow",[self.tab tabGroup],@"currentTabGroup",self.tab,@"currentTab",nil];
-				latch = [[TiUIWindowProxyLatch alloc]initWithWindow:self];
+				NSDictionary *values = [NSDictionary dictionaryWithObjectsAndKeys:self,@"currentWindow",[self.tab tabGroup],@"currentTabGroup",self.tab,@"currentTab",nil];
+				NSDictionary *preload = [NSDictionary dictionaryWithObjectsAndKeys:values,@"UI",nil];
+				latch = [[TiUIWindowProxyLatch alloc] initWithWindow:self args:args];
 				[context boot:latch url:url preload:preload];
 				if ([latch waitForBoot])
 				{
-					[self boot:NO];
+					[self boot:NO args:args];
 					return YES;
 				}
 				else 
@@ -505,7 +514,7 @@
 {
 	UIView * newTitleView = nil;
 	
-	if (controller == nil || [controller navigationController] == nil) {
+	if (animating || controller == nil || [controller navigationController] == nil) {
 		return; // No need to update the title if not in a nav controller
 	}
 	
@@ -693,7 +702,30 @@ else{\
 	// we also must do it in tabFocus below so that it reverts when we push off the stack
 	SETPROP(@"barColor",setBarColor);
 	SETPROP(@"barImage",setBarImage);
+	[self updateTitleView];
 	[super viewDidAttach];
+}
+
+- (void)viewWillAppear:(BOOL)animated;    // Called when the view is about to made visible. Default does nothing
+{
+	animating = YES;
+}
+
+- (void)viewDidAppear:(BOOL)animated;     // Called when the view has been fully transitioned onto the screen. Default does nothing
+{
+	animating = NO;
+	[self updateTitleView];
+}
+
+- (void)viewWillDisappear:(BOOL)animated; // Called when the view is dismissed, covered or otherwise hidden. Default does nothing
+{
+	animating = YES;
+}
+
+- (void)viewDidDisappear:(BOOL)animated;  // Called after the view was dismissed, covered or otherwise hidden. Default does nothing
+{
+	animating = NO;
+	[self updateTitleView];
 }
 
 -(void)setupWindowDecorations
@@ -743,7 +775,7 @@ else{\
 
 -(void)_tabBeforeBlur
 {
-	[barImageView removeFromSuperview];
+//	[barImageView removeFromSuperview];
 	[super _tabBeforeBlur];
 }
 

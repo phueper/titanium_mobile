@@ -18,11 +18,13 @@ import java.net.URL;
 import java.util.Date;
 import java.util.List;
 
+import org.appcelerator.kroll.KrollDict;
+import org.appcelerator.kroll.KrollInvocation;
+import org.appcelerator.kroll.KrollModule;
+import org.appcelerator.kroll.annotations.Kroll;
 import org.appcelerator.titanium.ContextSpecific;
 import org.appcelerator.titanium.TiBlob;
 import org.appcelerator.titanium.TiContext;
-import org.appcelerator.titanium.TiDict;
-import org.appcelerator.titanium.TiModule;
 import org.appcelerator.titanium.io.TiBaseFile;
 import org.appcelerator.titanium.io.TiFileFactory;
 import org.appcelerator.titanium.kroll.KrollCallback;
@@ -41,7 +43,6 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.database.Cursor;
-import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.hardware.Camera;
 import android.net.Uri;
@@ -50,50 +51,36 @@ import android.provider.MediaStore;
 import android.provider.MediaStore.Images;
 import android.view.Window;
 
-@ContextSpecific
-public class MediaModule extends TiModule
+@Kroll.module @ContextSpecific
+public class MediaModule extends KrollModule
 {
 	private static final String LCAT = "TiMedia";
 	private static final boolean DBG = TiConfig.LOGD;
 
-	private static final long[] DEFAULT_VIBRATE_PATTERN = { 100L,250L };
+	private static final long[] DEFAULT_VIBRATE_PATTERN = { 100L, 250L };
 	private static final String PHOTO_DCIM_CAMERA = "/sdcard/dcim/Camera";
 
-	protected static final int UNKNOWN_ERROR = 0;
-	protected static final int DEVICE_BUSY = 1;
-	protected static final int NO_CAMERA = 2;
-	protected static final int NO_VIDEO = 3;
+	@Kroll.constant public static final int UNKNOWN_ERROR = 0;
+	@Kroll.constant public static final int DEVICE_BUSY = 1;
+	@Kroll.constant public static final int NO_CAMERA = 2;
+	@Kroll.constant public static final int NO_VIDEO = 3;
 
-	protected static TiDict constants;
+	@Kroll.constant public static final int VIDEO_SCALING_ASPECT_FILL = 0;
+	@Kroll.constant public static final int VIDEO_SCALING_MODE_FILL = 1;
 
+	@Kroll.constant public static final int VIDEO_CONTROL_DEFAULT = 0;
+	@Kroll.constant public static final String MEDIA_TYPE_PHOTO = "public.image";
+	@Kroll.constant public static final String MEDIA_TYPE_VIDEO = "public.video";
+	
 	public MediaModule(TiContext tiContext)
 	{
 		super(tiContext);
 	}
 
-	@Override
-	public TiDict getConstants()
+	@Kroll.method
+	public void vibrate(@Kroll.argument(optional=true) long[] pattern)
 	{
-		if (constants == null) {
-			constants = new TiDict();
-
-			constants.put("UNKNOWN_ERROR", UNKNOWN_ERROR);
-			constants.put("DEVICE_BUSY", DEVICE_BUSY);
-			constants.put("NO_CAMERA", NO_CAMERA);
-			constants.put("NO_VIDEO", NO_VIDEO);
-
-			constants.put("VIDEO_SCALING_ASPECT_FILL", 0);
-			constants.put("VIDEO_SCALING_MODE_FILL", 1);
-
-			constants.put("VIDEO_CONTROL_DEFAULT", 0);
-		}
-
-		return constants;
-	}
-
-	public void vibrate(long[] pattern)
-	{
-		if (pattern == null) {
+		if (pattern.length == 0) {
 			pattern = DEFAULT_VIBRATE_PATTERN;
 		}
 		Vibrator vibrator = (Vibrator) getTiContext().getTiApp().getSystemService(Context.VIBRATOR_SERVICE);
@@ -102,10 +89,9 @@ public class MediaModule extends TiModule
 		}
 	}
 
-	public void showCamera(Object[] args)
+	@Kroll.method
+	public void showCamera(KrollInvocation invocation, KrollDict options)
 	{
-		TiDict options = (TiDict) args[0];
-
 		KrollCallback successCallback = null;
 		KrollCallback cancelCallback = null;
 		KrollCallback errorCallback = null;
@@ -119,10 +105,6 @@ public class MediaModule extends TiModule
 		if (options.containsKey("error")) {
 			errorCallback = (KrollCallback) options.get("error");
 		}
-
-		final KrollCallback fSuccessCallback = successCallback;
-		final KrollCallback fCancelCallback = cancelCallback;
-		final KrollCallback fErrorCallback = errorCallback;
 
 		if (DBG) {
 			Log.d(LCAT, "showCamera called");
@@ -139,7 +121,7 @@ public class MediaModule extends TiModule
 				camera.release();
 			}
 			if (errorCallback != null) {
-				errorCallback.callWithProperties(createErrorResponse(NO_CAMERA, "Camera not available."));
+				errorCallback.callAsync(createErrorResponse(NO_CAMERA, "Camera not available."));
 			}
 			return;
 		}
@@ -149,7 +131,7 @@ public class MediaModule extends TiModule
 			saveToPhotoGallery = options.getBoolean("saveToPhotoGallery");
 		}
 
-		Activity activity = getTiContext().getActivity();
+		Activity activity = invocation.getTiContext().getActivity();
 		TiActivitySupport activitySupport = (TiActivitySupport) activity;
 
 		TiFileHelper tfh = getTiContext().getTiFileHelper();
@@ -182,14 +164,12 @@ public class MediaModule extends TiModule
 		} catch (IOException e) {
 			Log.e(LCAT, "Unable to create temp file", e);
 			if (errorCallback != null) {
-				errorCallback.callWithProperties(createErrorResponse(UNKNOWN_ERROR, e.getMessage()));
+				errorCallback.callAsync(createErrorResponse(UNKNOWN_ERROR, e.getMessage()));
 			}
 			return;
 		}
 
-		final File finalImageFile = imageFile;
-		final String imageUrl = "file://" + imageFile.getAbsolutePath();
-		
+		String imageUrl = "file://" + imageFile.getAbsolutePath();
 		TiIntentWrapper cameraIntent = new TiIntentWrapper(new Intent());
 		cameraIntent.getIntent().setAction(MediaStore.ACTION_IMAGE_CAPTURE);
 		cameraIntent.getIntent().addCategory(Intent.CATEGORY_DEFAULT);
@@ -216,176 +196,199 @@ public class MediaModule extends TiModule
 			cameraIntent.getIntent().putExtra(MediaStore.EXTRA_OUTPUT, Uri.parse(imageUrl));
 		} 
 
-		final int code = activitySupport.getUniqueResultCode();
-		final boolean finalSaveToPhotoGallery = saveToPhotoGallery;
-
-		activitySupport.launchActivityForResult(cameraIntent.getIntent(), code,
-			new TiActivityResultHandler() {
-
-				public void onResult(Activity activity, int requestCode, int resultCode, Intent data)
-				{
-					if (resultCode == Activity.RESULT_CANCELED) {
-						if (finalImageFile != null) {
-							finalImageFile.delete();
-						}
-						if (fCancelCallback != null) {
-							fCancelCallback.call(null);
-						}
-					} else {
-						if (data == null) {
-							ContentValues values = new ContentValues(7);
-							values.put(Images.Media.TITLE, finalImageFile.getName());
-							values.put(Images.Media.DISPLAY_NAME, finalImageFile.getName());
-							values.put(Images.Media.DATE_TAKEN, new Date().getTime());
-							values.put(Images.Media.MIME_TYPE, "image/jpeg");
-							if (finalSaveToPhotoGallery) {
-								values.put(Images.ImageColumns.BUCKET_ID, PHOTO_DCIM_CAMERA.toLowerCase().hashCode());
-								values.put(Images.ImageColumns.BUCKET_DISPLAY_NAME, "Camera");
-							} else {
-								values.put(Images.ImageColumns.BUCKET_ID, finalImageFile.getPath().toLowerCase().hashCode());
-								values.put(Images.ImageColumns.BUCKET_DISPLAY_NAME, finalImageFile.getName());
-							}
-							values.put("_data", finalImageFile.getAbsolutePath());
-	
-							Uri imageUri = activity.getContentResolver().insert(Images.Media.EXTERNAL_CONTENT_URI, values);
-	
-							try {
-								if (fSuccessCallback != null) {
-									fSuccessCallback.callWithProperties(createDictForImage(imageUri.toString(), "image/jpeg"));
-								}
-							} catch (OutOfMemoryError e) {
-								String msg = "Not enough memory to get image: " + e.getMessage();
-								Log.e(LCAT, msg);
-								if (fErrorCallback != null) {
-									fErrorCallback.callWithProperties(createErrorResponse(UNKNOWN_ERROR, msg));
-								}
-							}
-						} else {
-							// Get the content information about the saved image
-							String[] projection = {
-								Images.Media.TITLE,
-								Images.Media.DISPLAY_NAME,
-								Images.Media.MIME_TYPE,
-								Images.ImageColumns.BUCKET_ID,
-								Images.ImageColumns.BUCKET_DISPLAY_NAME,
-								"_data"
-							};
-
-							String title = null;
-							String displayName = null;
-							String mimeType = null;
-							String bucketId = null;
-							String bucketDisplayName = null;
-							String dataPath = null;
-
-							Cursor c = activity.getContentResolver().query(data.getData(), projection, null, null, null);
-							if (c != null) {
-								try {
-									if (c.moveToNext()) {
-										title = c.getString(0);
-										displayName = c.getString(1);
-										mimeType = c.getString(2);
-										bucketId = c.getString(3);
-										bucketDisplayName = c.getString(4);
-										dataPath = c.getString(5);
-										
-										if (DBG) {
-											Log.d(LCAT,"Image { title: " + title + " displayName: " + displayName + " mimeType: " + mimeType +
-												" bucketId: " + bucketId + " bucketDisplayName: " + bucketDisplayName +
-												" path: " + dataPath + " }");
-										}
-									}
-								} finally {
-									if (c != null) {
-										c.close();
-										c = null;
-									}
-								}
-							}
-							
-							String localImageUrl = dataPath;
-							
-							if (!finalSaveToPhotoGallery) {
-								
-								// We need to move the image from dataPath to imageUrl
-								try {
-									URL url = new URL(imageUrl);
-									
-									File src = new File(dataPath);
-									File dst = new File(url.getPath());
-									
-									BufferedInputStream bis = null;
-									BufferedOutputStream bos = null;
-									
-									try {
-										bis = new BufferedInputStream(new FileInputStream(src), 8096);
-										bos = new BufferedOutputStream(new FileOutputStream(dst), 8096);
-										
-										byte[] buf = new byte[8096];
-										int len = 0;
-										
-										while((len = bis.read(buf)) != -1) {
-											bos.write(buf, 0, len);
-										}
-									} finally {
-										if (bis != null) {
-											bis.close();
-										}
-										if (bos != null) {
-											bos.close();
-										}
-									}
-									
-									// Update Content
-									ContentValues values = new ContentValues();
-									values.put(Images.ImageColumns.BUCKET_ID, finalImageFile.getPath().toLowerCase().hashCode());
-									values.put(Images.ImageColumns.BUCKET_DISPLAY_NAME, finalImageFile.getName());
-									values.put("_data", finalImageFile.getAbsolutePath());
-		
-									activity.getContentResolver().update(data.getData(), values, null, null);
-
-									src.delete();
-									localImageUrl = imageUrl; // make sure it's a good URL before setting it to pass back.
-
-								} catch (MalformedURLException e) {
-									Log.e(LCAT, "Invalid URL not moving image: " + e.getMessage());
-								} catch (IOException e) {
-									Log.e(LCAT, "Unable to move file: " + e.getMessage(), e);
-								}
-							}
-							
-							try {
-								if (fSuccessCallback != null) {
-									fSuccessCallback.callWithProperties(createDictForImage(localImageUrl, "image/jpeg"));
-								}
-							} catch (OutOfMemoryError e) {
-								String msg = "Not enough memory to get image: " + e.getMessage();
-								Log.e(LCAT, msg);
-								if (fErrorCallback != null) {
-									fErrorCallback.callWithProperties(createErrorResponse(UNKNOWN_ERROR, msg));
-								}
-							}
-						}
-					}
-				}
-
-				public void onError(Activity activity, int requestCode, Exception e) {
-					if (finalImageFile != null) {
-						finalImageFile.delete();
-					}
-					String msg = "Camera problem: " + e.getMessage();
-					Log.e(LCAT, msg, e);
-					if (fErrorCallback != null) {
-						fErrorCallback.callWithProperties(createErrorResponse(UNKNOWN_ERROR, msg));
-					}
-				}
-			});
+		CameraResultHandler resultHandler = new CameraResultHandler();
+		resultHandler.imageFile = imageFile;
+		resultHandler.imageUrl = imageUrl;
+		resultHandler.saveToPhotoGallery = saveToPhotoGallery;
+		resultHandler.successCallback = successCallback;
+		resultHandler.cancelCallback = cancelCallback;
+		resultHandler.errorCallback = errorCallback;
+		resultHandler.activitySupport = activitySupport;
+		resultHandler.cameraIntent = cameraIntent.getIntent();
+		activity.runOnUiThread(resultHandler);
 	}
 
-	public void openPhotoGallery(Object[] args)
+	protected class CameraResultHandler implements TiActivityResultHandler, Runnable
 	{
-		TiDict options = (TiDict) args[0];
+		protected File imageFile;
+		protected String imageUrl;
+		protected boolean saveToPhotoGallery;
+		protected int code;
+		protected KrollCallback successCallback, cancelCallback, errorCallback;
+		protected TiActivitySupport activitySupport;
+		protected Intent cameraIntent;
 
+		@Override
+		public void run()
+		{
+			code = activitySupport.getUniqueResultCode();
+			activitySupport.launchActivityForResult(cameraIntent, code, this);
+		}
+
+		@Override
+		public void onResult(Activity activity, int requestCode, int resultCode, Intent data)
+		{
+			if (resultCode == Activity.RESULT_CANCELED) {
+				if (imageFile != null) {
+					imageFile.delete();
+				}
+				if (cancelCallback != null) {
+					cancelCallback.callAsync();
+				}
+			} else {
+				if (data == null) {
+					ContentValues values = new ContentValues(7);
+					values.put(Images.Media.TITLE, imageFile.getName());
+					values.put(Images.Media.DISPLAY_NAME, imageFile.getName());
+					values.put(Images.Media.DATE_TAKEN, new Date().getTime());
+					values.put(Images.Media.MIME_TYPE, "image/jpeg");
+					if (saveToPhotoGallery) {
+						values.put(Images.ImageColumns.BUCKET_ID, PHOTO_DCIM_CAMERA.toLowerCase().hashCode());
+						values.put(Images.ImageColumns.BUCKET_DISPLAY_NAME, "Camera");
+					} else {
+						values.put(Images.ImageColumns.BUCKET_ID, imageFile.getPath().toLowerCase().hashCode());
+						values.put(Images.ImageColumns.BUCKET_DISPLAY_NAME, imageFile.getName());
+					}
+					values.put("_data", imageFile.getAbsolutePath());
+
+					Uri imageUri = activity.getContentResolver().insert(Images.Media.EXTERNAL_CONTENT_URI, values);
+
+					try {
+						if (successCallback != null) {
+							successCallback.callAsync(createDictForImage(imageUri.toString(), "image/jpeg"));
+						}
+					} catch (OutOfMemoryError e) {
+						String msg = "Not enough memory to get image: " + e.getMessage();
+						Log.e(LCAT, msg);
+						if (errorCallback != null) {
+							errorCallback.callAsync(createErrorResponse(UNKNOWN_ERROR, msg));
+						}
+					}
+				} else {
+					// Get the content information about the saved image
+					String[] projection = {
+						Images.Media.TITLE,
+						Images.Media.DISPLAY_NAME,
+						Images.Media.MIME_TYPE,
+						Images.ImageColumns.BUCKET_ID,
+						Images.ImageColumns.BUCKET_DISPLAY_NAME,
+						"_data"
+					};
+
+					String title = null;
+					String displayName = null;
+					String mimeType = null;
+					String bucketId = null;
+					String bucketDisplayName = null;
+					String dataPath = null;
+
+					Cursor c = activity.getContentResolver().query(data.getData(), projection, null, null, null);
+					if (c != null) {
+						try {
+							if (c.moveToNext()) {
+								title = c.getString(0);
+								displayName = c.getString(1);
+								mimeType = c.getString(2);
+								bucketId = c.getString(3);
+								bucketDisplayName = c.getString(4);
+								dataPath = c.getString(5);
+								
+								if (DBG) {
+									Log.d(LCAT,"Image { title: " + title + " displayName: " + displayName + " mimeType: " + mimeType +
+										" bucketId: " + bucketId + " bucketDisplayName: " + bucketDisplayName +
+										" path: " + dataPath + " }");
+								}
+							}
+						} finally {
+							if (c != null) {
+								c.close();
+								c = null;
+							}
+						}
+					}
+					
+					String localImageUrl = dataPath;
+					
+					if (!saveToPhotoGallery) {
+						
+						// We need to move the image from dataPath to imageUrl
+						try {
+							URL url = new URL(imageUrl);
+							
+							File src = new File(dataPath);
+							File dst = new File(url.getPath());
+							
+							BufferedInputStream bis = null;
+							BufferedOutputStream bos = null;
+							
+							try {
+								bis = new BufferedInputStream(new FileInputStream(src), 8096);
+								bos = new BufferedOutputStream(new FileOutputStream(dst), 8096);
+								
+								byte[] buf = new byte[8096];
+								int len = 0;
+								
+								while((len = bis.read(buf)) != -1) {
+									bos.write(buf, 0, len);
+								}
+							} finally {
+								if (bis != null) {
+									bis.close();
+								}
+								if (bos != null) {
+									bos.close();
+								}
+							}
+							
+							// Update Content
+							ContentValues values = new ContentValues();
+							values.put(Images.ImageColumns.BUCKET_ID, imageFile.getPath().toLowerCase().hashCode());
+							values.put(Images.ImageColumns.BUCKET_DISPLAY_NAME, imageFile.getName());
+							values.put("_data", imageFile.getAbsolutePath());
+
+							activity.getContentResolver().update(data.getData(), values, null, null);
+
+							src.delete();
+							localImageUrl = imageUrl; // make sure it's a good URL before setting it to pass back.
+
+						} catch (MalformedURLException e) {
+							Log.e(LCAT, "Invalid URL not moving image: " + e.getMessage());
+						} catch (IOException e) {
+							Log.e(LCAT, "Unable to move file: " + e.getMessage(), e);
+						}
+					}
+					
+					try {
+						if (successCallback != null) {
+							successCallback.callAsync(createDictForImage(localImageUrl, "image/jpeg"));
+						}
+					} catch (OutOfMemoryError e) {
+						String msg = "Not enough memory to get image: " + e.getMessage();
+						Log.e(LCAT, msg);
+						if (errorCallback != null) {
+							errorCallback.callAsync(createErrorResponse(UNKNOWN_ERROR, msg));
+						}
+					}
+				}
+			}
+		}
+
+		@Override
+		public void onError(Activity activity, int requestCode, Exception e) {
+			if (imageFile != null) {
+				imageFile.delete();
+			}
+			String msg = "Camera problem: " + e.getMessage();
+			Log.e(LCAT, msg, e);
+			if (errorCallback != null) {
+				errorCallback.callAsync(createErrorResponse(UNKNOWN_ERROR, msg));
+			}
+		}
+	}
+
+	@Kroll.method
+	public void openPhotoGallery(KrollInvocation invocation, KrollDict options)
+	{
 		KrollCallback successCallback = null;
 		KrollCallback cancelCallback = null;
 		KrollCallback errorCallback = null;
@@ -408,7 +411,7 @@ public class MediaModule extends TiModule
 			Log.d(LCAT, "openPhotoGallery called");
 		}
 
-		Activity activity = getTiContext().getActivity();
+		Activity activity = invocation.getTiContext().getActivity();
 		TiActivitySupport activitySupport = (TiActivitySupport) activity;
 
 		TiIntentWrapper galleryIntent = new TiIntentWrapper(new Intent());
@@ -426,19 +429,19 @@ public class MediaModule extends TiModule
 					Log.e(LCAT, "OnResult called: " + resultCode);
 					if (resultCode == Activity.RESULT_CANCELED) {
 						if (fCancelCallback != null) {
-							fCancelCallback.call(null);
+							fCancelCallback.callAsync();
 						}
 					} else {
 						String path = data.getDataString();
 						try {
 							if (fSuccessCallback != null) {
-								fSuccessCallback.callWithProperties(createDictForImage(path, "image/jpeg"));
+								fSuccessCallback.callAsync(createDictForImage(path, "image/jpeg"));
 							}
 						} catch (OutOfMemoryError e) {
 							String msg = "Not enough memory to get image: " + e.getMessage();
 							Log.e(LCAT, msg);
 							if (fErrorCallback != null) {
-								fErrorCallback.callWithProperties(createErrorResponse(UNKNOWN_ERROR, msg));
+								fErrorCallback.callAsync(createErrorResponse(UNKNOWN_ERROR, msg));
 							}
 						}
 					}
@@ -449,26 +452,27 @@ public class MediaModule extends TiModule
 					String msg = "Gallery problem: " + e.getMessage();
 					Log.e(LCAT, msg, e);
 					if (fErrorCallback != null) {
-						fErrorCallback.callWithProperties(createErrorResponse(UNKNOWN_ERROR, msg));
+						fErrorCallback.callAsync(createErrorResponse(UNKNOWN_ERROR, msg));
 					}
 				}
 			});
 	}
 
+	@Kroll.method
 	public void saveToPhotoGallery(Object object)
 	{
 		Log.w(LCAT, "saveToPhotoGallery not yet implemented in Android");
 	}
 
-	TiDict createDictForImage(String path, String mimeType) {
-		TiDict d = new TiDict();
+	KrollDict createDictForImage(String path, String mimeType) {
+		KrollDict d = new KrollDict();
 
 		int width = -1;
 		int height = -1;
 
 		try {
 			String fpath = path;
-			if (!fpath.startsWith("file://")) {
+			if (!fpath.startsWith("file://") && !fpath.startsWith("content://")) {
 				fpath = "file://" + path;
 			}
 			BitmapFactory.Options opts = new BitmapFactory.Options();
@@ -485,7 +489,7 @@ public class MediaModule extends TiModule
 		d.put("width", width);
 		d.put("height", height);
 
-		TiDict cropRect = new TiDict();
+		KrollDict cropRect = new KrollDict();
 		cropRect.put("x", 0);
 		cropRect.put("y", 0);
 		cropRect.put("width", width);
@@ -493,38 +497,38 @@ public class MediaModule extends TiModule
 		d.put("cropRect", cropRect);
 
 		String[] parts = { path };
+		d.put("mediaType", MEDIA_TYPE_PHOTO);
 		d.put("media", TiBlob.blobFromFile(getTiContext(), TiFileFactory.createTitaniumFile(getTiContext(), parts, false), mimeType));
 
 		return d;
 	}
 
-	TiDict createDictForImage(int width, int height, byte[] data) {
-		TiDict d = new TiDict();
+	KrollDict createDictForImage(int width, int height, byte[] data) {
+		KrollDict d = new KrollDict();
 
 		d.put("x", 0);
 		d.put("y", 0);
 		d.put("width", width);
 		d.put("height", height);
 
-		TiDict cropRect = new TiDict();
+		KrollDict cropRect = new KrollDict();
 		cropRect.put("x", 0);
 		cropRect.put("y", 0);
 		cropRect.put("width", width);
 		cropRect.put("height", height);
 		d.put("cropRect", cropRect);
-
+		d.put("mediaType", MEDIA_TYPE_PHOTO);
 		d.put("media", TiBlob.blobFromData(getTiContext(), data, "image/png"));
 
 		return d;
 	}
 
-	public void previewImage(Object[] args)
+	@Kroll.method
+	public void previewImage(KrollInvocation invocation, KrollDict options)
 	{
 		if (DBG) {
 			Log.d(LCAT, "previewImage");
 		}
-
-		TiDict options = (TiDict) args[0];
 
 		KrollCallback successCallback = null;
 		KrollCallback errorCallback = null;
@@ -542,7 +546,7 @@ public class MediaModule extends TiModule
 
 		if (image == null) {
 			if (errorCallback != null) {
-				errorCallback.callWithProperties(createErrorResponse(UNKNOWN_ERROR, "Missing image property"));
+				errorCallback.callAsync(createErrorResponse(UNKNOWN_ERROR, "Missing image property"));
 			}
 		}
 
@@ -555,7 +559,7 @@ public class MediaModule extends TiModule
 			Log.d(LCAT, "openPhotoGallery called");
 		}
 
-		Activity activity = getTiContext().getActivity();
+		Activity activity = invocation.getTiContext().getActivity();
 		TiActivitySupport activitySupport = (TiActivitySupport) activity;
 
 		TiIntentWrapper previewIntent = new TiIntentWrapper(new Intent());
@@ -572,7 +576,7 @@ public class MediaModule extends TiModule
 				{
 					Log.e(LCAT, "OnResult called: " + resultCode);
 					if (fSuccessCallback != null) {
-						fSuccessCallback.call(null);
+						fSuccessCallback.callAsync();
 					}
 				}
 
@@ -581,12 +585,13 @@ public class MediaModule extends TiModule
 					String msg = "Gallery problem: " + e.getMessage();
 					Log.e(LCAT, msg, e);
 					if (fErrorCallback != null) {
-						fErrorCallback.callWithProperties(createErrorResponse(UNKNOWN_ERROR, msg));
+						fErrorCallback.callAsync(createErrorResponse(UNKNOWN_ERROR, msg));
 					}
 				}
 			});
 	}
 
+	@Kroll.method
 	public void takeScreenshot(KrollCallback callback)
 	{
 		Activity a = getTiContext().getActivity();
@@ -600,24 +605,9 @@ public class MediaModule extends TiModule
 			w = w.getContainer();
 		}
 
-		TiDict image = TiUIHelper.viewToImage(getTiContext(), w.getDecorView());
+		KrollDict image = TiUIHelper.viewToImage(getTiContext(), null, w.getDecorView());
 		if (callback != null && image != null) {
-			callback.call(new Object[] { image });
+			callback.callAsync(new Object[] { image });
 		}
-	}
-
-	@Override
-	public void onDestroy() {
-		super.onDestroy();
-	}
-
-	@Override
-	public void onPause() {
-		super.onPause();
-	}
-
-	@Override
-	public void onResume() {
-		super.onResume();
 	}
 }

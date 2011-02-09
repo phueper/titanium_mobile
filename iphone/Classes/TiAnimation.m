@@ -378,7 +378,7 @@ if (!TiDimensionIsUndefined(autoreverseLayout.a)) {\
 		// animation.. which we don't want
 		TiViewProxy * ourProxy = (TiViewProxy*)[view_ proxy];
 		LayoutConstraint *contraints = [ourProxy layoutProperties];
-		ApplyConstraintToViewWithinViewWithBounds(contraints, view_, transitionView, transitionView.bounds, NO);
+		ApplyConstraintToViewWithBounds(contraints, view_, transitionView.bounds);
 		[ourProxy layoutChildren:NO];
 	}
 	else
@@ -461,7 +461,7 @@ if (!TiDimensionIsUndefined(autoreverseLayout.a)) {\
 	}
 	
 	if ([view_ isKindOfClass:[TiUIView class]])
-	{
+	{	//TODO: Shouldn't we be updating the proxy's properties to reflect this?
 		TiUIView *uiview = (TiUIView*)view_;
 		LayoutConstraint *layout = [(TiViewProxy *)[uiview proxy] layoutProperties];
 		
@@ -485,10 +485,24 @@ else \
 		CHECK_LAYOUT_CHANGE(height);
 		CHECK_LAYOUT_CHANGE(top);
 		CHECK_LAYOUT_CHANGE(bottom);
+		if (center!=nil && layout != NULL)
+		{
+			autoreverseLayout.centerX = layout->centerX;
+			autoreverseLayout.centerY = layout->centerY;
+			layout->centerX = [center xDimension];
+			layout->centerY = [center yDimension];
+			doReposition = YES;
+		}
+		else
+		{
+			autoreverseLayout.centerX = TiDimensionUndefined;
+			autoreverseLayout.centerY = TiDimensionUndefined;
+		}
+
 
 		if (zIndex!=nil)
 		{
-			[uiview performSelector:@selector(setZIndex_:) withObject:zIndex];
+			[(TiViewProxy *)[uiview proxy] setZIndex:[zIndex intValue]];
 		}
 		
 		if (doReposition)
@@ -496,12 +510,7 @@ else \
 			[(TiViewProxy *)[uiview proxy] reposition];
 		}
 	}
-		
-	if (center!=nil)
-	{
-		view_.center = [center point];
-	}
-	
+
 	if (backgroundColor!=nil)
 	{
 		TiColor *color_ = [TiUtils colorValue:backgroundColor];
@@ -548,7 +557,9 @@ else \
 			// and then we need to add our new view
 			for (UIView *subview in [transitionView subviews])
 			{
-				[subview removeFromSuperview];
+				if (subview != view_) {
+					[subview removeFromSuperview];
+				}
 			}
 			[transitionView addSubview:view_];
 		}

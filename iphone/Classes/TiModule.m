@@ -15,10 +15,11 @@
 
 -(void)dealloc
 {
-	WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+	WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
 	[[NSNotificationCenter defaultCenter] removeObserver:self name:kTiShutdownNotification object:nil];
 	[[NSNotificationCenter defaultCenter] removeObserver:self name:kTiSuspendNotification object:nil];
 	[[NSNotificationCenter defaultCenter] removeObserver:self name:kTiResumeNotification object:nil];
+	[[NSNotificationCenter defaultCenter] removeObserver:self name:kTiResumedNotification object:nil];
 	
 	RELEASE_TO_NIL(host);
 	if (classNameLookup != NULL)
@@ -58,6 +59,11 @@
 {
 }
 
+// Different from resume - there's some information we can only update AFTER the app has popped to the foreground.
+-(void)resumed:(id)sender
+{
+}
+
 -(void)startup
 {
 	if (classNameLookup == NULL)
@@ -66,10 +72,11 @@
 		//We do not retain the Class, but simply assign them.
 	}
 
-	WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+	WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
 	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(shutdown:) name:kTiShutdownNotification object:nil];
 	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(suspend:) name:kTiSuspendNotification object:nil];
 	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(resume:) name:kTiResumeNotification object:nil];
+	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(resumed:) name:kTiResumedNotification object:nil];
 }
 
 -(void)_configure
@@ -125,8 +132,7 @@
 		CFDictionarySetValue(classNameLookup, name, resultClass);		
 	}
 
-	TiProxy *proxy = [resultClass alloc];
-	return [[proxy _initWithPageContext:context args:args] autorelease];
+	return [[[resultClass alloc] _initWithPageContext:context args:args] autorelease];
 }
 
 

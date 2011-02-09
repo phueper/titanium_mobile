@@ -11,6 +11,7 @@
 @interface Bridge : NSObject {
 @private
 	id callback;
+	NSString *basename;
 @protected
 	NSURL *url;
 	TiHost *host;
@@ -27,5 +28,7 @@
 -(void)gc;
 
 -(TiHost*)host;
+
+- (NSString*)basename;
 
 @end

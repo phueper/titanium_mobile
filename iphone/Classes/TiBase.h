@@ -12,6 +12,23 @@
 #define TI_BASE_H
 
 #define MEMORY_DEBUG 0
+#define VIEW_DEBUG 0
+
+#ifndef __IPHONE_3_2
+#define __IPHONE_3_2 30200
+#endif
+
+#ifndef __IPHONE_4_0
+#define __IPHONE_4_0 40000
+#endif
+
+#ifndef __IPHONE_4_1
+#define __IPHONE_4_1 40100
+#endif
+
+#ifndef __IPHONE_4_2
+#define __IPHONE_4_2 40200
+#endif
 
 #ifdef DEBUG
 	// Kroll memory debugging
@@ -66,61 +83,6 @@ CGPoint midpointBetweenPoints(CGPoint a, CGPoint b);
 #define CODELOCATION	[NSString stringWithFormat:@" in %s (%@:%d)",__FUNCTION__,[[NSString stringWithFormat:@"%s",__FILE__] lastPathComponent],__LINE__]
 
 #define NULL_IF_NIL(x)	({ id xx = (x); (xx==nil)?[NSNull null]:xx; })
-
-#define WAIT_UNTIL_DONE_ON_UI_THREAD	NO
-
-#define ENSURE_UI_THREAD_1_ARG(x)	\
-if (![NSThread isMainThread]) { \
-[self performSelectorOnMainThread:_cmd withObject:x waitUntilDone:WAIT_UNTIL_DONE_ON_UI_THREAD modes:[NSArray arrayWithObject:NSRunLoopCommonModes]]; \
-return; \
-} \
-
-// TODO: This is wrong for functions which do not take any argument.
-#define ENSURE_UI_THREAD_0_ARGS		ENSURE_UI_THREAD_1_ARG(nil)
-
-//TODO: Is there any time where @selector(x:) is not _sel (IE, the called method for 1 arg?
-//Similarly, if we already have x:withObject: as a selector in _sel, could we 
-//We may want phase out asking the method explicitly when the compiler can do it for us
-//For now, leaving it unchanged and using _X_ARG(S) to denote no method name used.
-
-#define ENSURE_UI_THREAD(x,y) \
-if (![NSThread isMainThread]) { \
-[self performSelectorOnMainThread:@selector(x:) withObject:y waitUntilDone:WAIT_UNTIL_DONE_ON_UI_THREAD]; \
-return; \
-} \
-
-#define ENSURE_UI_THREAD_WITH_OBJS(x,...)	\
-if (![NSThread isMainThread]) { \
-id o = [NSArray arrayWithObjects:@"" #x, ##__VA_ARGS__, nil];\
-[self performSelectorOnMainThread:@selector(_dispatchWithObjectOnUIThread:) withObject:o waitUntilDone:WAIT_UNTIL_DONE_ON_UI_THREAD]; \
-return; \
-} \
-
-#define ENSURE_UI_THREAD_WITH_OBJ(x,y,z) \
-ENSURE_UI_THREAD_WITH_OBJS(x,NULL_IF_NIL(y),NULL_IF_NIL(z))
-
-#define BEGIN_UI_THREAD_PROTECTED_VALUE(method,type) \
--(id)_sync_##method:(NSMutableArray*)array_\
-{\
-\
-type* result = nil;\
-\
-
-#define END_UI_THREAD_PROTECTED_VALUE(method) \
-if (array_!=nil)[array_ addObject:result];\
-return result;\
-}\
--(id)method\
-{\
-if (![NSThread isMainThread])\
-{\
-NSMutableArray *array = [NSMutableArray array];\
-[self performSelectorOnMainThread:@selector(_sync_##method:) withObject:array waitUntilDone:YES];\
-return [array objectAtIndex:0];\
-}\
-return [self _sync_##method:nil];\
-\
-}\
 
 
 //NOTE: these checks can be pulled out of production build type
@@ -370,8 +332,6 @@ NSLog(@"FRAME -- size=%fx%f, origin=%f,%f",f.size.width,f.size.height,f.origin.x
 
 #else
 #define FRAME_DEBUG(f) 
-#define WARN_IF_BACKGROUND_THREAD
-#define CHECK_MAIN_THREAD	
 #endif
 
 
@@ -408,16 +368,9 @@ return value;\
 
 #define VerboseLog(...)	{NSLog(__VA_ARGS__);}
 
-#define WARN_IF_BACKGROUND_THREAD	\
-if(![NSThread isMainThread])	\
-{	\
-	NSLog(@"[WARN] %@%@ was not running on the main thread.",NSStringFromClass([self class]),CODELOCATION);	\
-}	\
-
 #else
 
 #define VerboseLog(...)	{}
-#define WARN_IF_BACKGROUND_THREAD	{}
 
 #endif
 
@@ -442,19 +395,15 @@ extern NSString * const kTiWillShutdownNotification;
 extern NSString * const kTiShutdownNotification;
 extern NSString * const kTiSuspendNotification;
 extern NSString * const kTiResumeNotification;
+extern NSString * const kTiResumedNotification;
 extern NSString * const kTiAnalyticsNotification;
 extern NSString * const kTiRemoteDeviceUUIDNotification;
 extern NSString * const kTiGestureShakeNotification;
 extern NSString * const kTiRemoteControlNotification;
 
-#ifndef __IPHONE_3_2
-#define __IPHONE_3_2 30200
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_4_0
+extern NSString * const kTiLocalNotification;
 #endif
-
-#ifndef __IPHONE_4_0
-#define __IPHONE_4_0 40000
-#endif
-
 
 #ifndef ASI_AUTOUPDATE_NETWORK_INDICATOR
 	#define ASI_AUTOUPDATE_NETWORK_INDICATOR 0
@@ -464,5 +413,7 @@ extern NSString * const kTiRemoteControlNotification;
 	#define REACHABILITY_20_API 1
 #endif
 
+#include "TiThreading.h"
+#include "TiPublicAPI.h"
 
 #endif

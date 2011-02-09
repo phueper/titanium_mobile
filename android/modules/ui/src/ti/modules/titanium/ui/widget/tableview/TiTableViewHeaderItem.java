@@ -7,7 +7,7 @@
 package ti.modules.titanium.ui.widget.tableview;
 
 import org.appcelerator.titanium.TiContext;
-import org.appcelerator.titanium.TiDict;
+import org.appcelerator.titanium.util.Log;
 import org.appcelerator.titanium.util.TiConfig;
 import org.appcelerator.titanium.util.TiUIHelper;
 
@@ -33,7 +33,6 @@ public class TiTableViewHeaderItem extends TiBaseTableViewItem
 
 		public RowView(Context context) {
 			super(context);
-
 			setGravity(Gravity.CENTER_VERTICAL);
 
 			textView = new TextView(context);
@@ -46,16 +45,15 @@ public class TiTableViewHeaderItem extends TiBaseTableViewItem
 			addView(textView, params);
 
 			setPadding(0, 0, 0, 0);
-			setMinimumHeight(18);
+			setMinimumHeight((int)TiUIHelper.getRawDIPSize(18, context));
 			setVerticalFadingEdgeEnabled(false);
 			TiUIHelper.styleText(textView, "", "10dp", "normal"); //TODO font
 			textView.setBackgroundColor(Color.DKGRAY);
 			textView.setTextColor(Color.LTGRAY);
-			textView.setPadding(4, 2, 4, 2);
+			TiUIHelper.setTextViewDIPPadding(textView, 4, 2);
 		}
 
-		public void setRowData(Item item)
-		{
+		public void setRowData(Item item) {
 			this.item = item;
 			if (item.headerText != null) {
 				textView.setText(item.headerText, TextView.BufferType.NORMAL);
@@ -63,21 +61,19 @@ public class TiTableViewHeaderItem extends TiBaseTableViewItem
 				textView.setText(item.footerText, TextView.BufferType.NORMAL);
 			}
 		}
-		
+
 		public Item getRowData() {
 			return item;
 		}
 	}
 
 
-	public TiTableViewHeaderItem(TiContext tiContext)
-	{
+	public TiTableViewHeaderItem(TiContext tiContext) {
 		super(tiContext);
-
 		this.handler = new Handler(this);
 		rowView = new RowView(tiContext.getActivity());
 		this.addView(rowView, new LayoutParams(LayoutParams.FILL_PARENT,LayoutParams.FILL_PARENT));
-		setMinimumHeight(18);
+		setMinimumHeight((int)TiUIHelper.getRawDIPSize(18, tiContext.getActivity()));
 	}
 
 	public void setRowData(Item item) {

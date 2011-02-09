@@ -37,15 +37,16 @@ searchHidden[boolean]: boolean to control the visibility of the search field
 filterAttribute[string]: the filter attribute to be used when searching. this property maps to your data object or a property on the row object
 filterCaseInsensitive[boolean]: boolean to indicate if the search should be case sensitive or case insensitive (default)
 index[array]: an array of objects (with title and index properties) to control the table view index
-editable[boolean]: allow the table view to be editable (this must be true for swipe-to-delete)
-editing[boolean]: boolean to control the editing state of the table view
-moving[boolean]: boolean to control the moveable state of the table view
+editable[boolean]: allow the table view to be editable (this must be true for swipe-to-delete) (iOS Only)
+editing[boolean]: boolean to control the editing state of the table view (iOS Only)
+moving[boolean]: boolean to control the moveable state of the table view (iOS Only)
 rowHeight[float]: default row height for table view rows
 minRowHeight[float]: min row height for table view rows
 maxRowHeight[float]: max row height for table view rows
 data[array]: the data array of objects to be used for the rows of the table view
-style[int]: iPhone only. the style of the table view. constant from [Titanium.UI.iPhone.TableViewStyle](Titanium.UI.iPhone.TableViewStyle)
+style[int]: iPhone only. the style of the table view. constant from `Titanium.UI.iPhone.TableViewStyle`
 allowsSelection[boolean]: true if the rows can be selected
+allowsSelectionDuringEditing[boolean]: true if the rows can be selected while editing the table (iOS Only)
 scrollable[boolean]: true (default) if tableview can be scrolled
 
 - methods
@@ -118,8 +119,8 @@ properties[object]: animation properties. `position` property controls the posit
 delete: fired when a table row is delete by the user
 move: fired when a table row is moved by the user
 click: fired when a table row is clicked
-scroll: fired when the table view is scrolled (currently, iphone only)
-scrollEnd: fired when the table view stops scrolling (currently, iphone only)
+scroll: fired when the table view is scrolled
+scrollEnd: fired when the table view stops scrolling
 
 - event : delete
 
@@ -150,14 +151,17 @@ rowData: table view row data object
 
 - event : scroll
 
-contentOffset: dictionary with `x` and `y` properties containing the content offset
-contentSize: dictionary with `width` and `height` properties containing the size of the content (regardless of the display size in the case of scrolling)
+contentOffset: dictionary with `x` and `y` properties containing the content offset (iOS only)
+contentSize: dictionary with `width` and `height` properties containing the size of the content (regardless of the display size in the case of scrolling) (iOS only)
 size: dictionary with `width` and `height` properties containing the size of the visible table view
+firstVisibleItem: the row index of the topmost visible row in the view (Android only)
+visibleItemCount: the number of rows currently visible in the view (Android only)
+totalItemCount: the total number of rows in the view (Android only)
 
 - event : scrollEnd
 
-contentOffset: dictionary with `x` and `y` properties containing the content offset
-contentSize: dictionary with `width` and `height` properties containing the size of the content (regardless of the display size in the case of scrolling)
+contentOffset: dictionary with `x` and `y` properties containing the content offset (iOS only)
+contentSize: dictionary with `width` and `height` properties containing the size of the content (regardless of the display size in the case of scrolling) (iOS only)
 size: dictionary with `width` and `height` properties containing the size of the visible table view
 
 - example : Simple Table View with basic rows

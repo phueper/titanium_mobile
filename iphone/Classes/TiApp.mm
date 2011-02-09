@@ -27,7 +27,7 @@ extern NSString * const TI_APPLICATION_VERSION;
 
 extern void UIColorFlushCache();
 
-#define SHUTDOWN_TIMEOUT_IN_SEC	10
+#define SHUTDOWN_TIMEOUT_IN_SEC	3
 #define TIV @"TiVerify"
 
 //
@@ -91,25 +91,28 @@ void MyUncaughtExceptionHandler(NSException *exception)
 	return sharedApp;
 }
 
--(void)changeNetworkStatus:(NSNumber*)yn
++(UIViewController<TiRootController>*)controller;
 {
-	ENSURE_UI_THREAD(changeNetworkStatus,yn);
-	[UIApplication sharedApplication].networkActivityIndicatorVisible = [TiUtils boolValue:yn];
+	return [sharedApp controller];
 }
 
 -(void)startNetwork
 {
-	if (OSAtomicIncrement32(&networkActivityCount))
+	ENSURE_UI_THREAD_0_ARGS;
+	networkActivityCount ++;
+	if (networkActivityCount == 1)
 	{
-		[self changeNetworkStatus:[NSNumber numberWithBool:YES]];
+		[[UIApplication sharedApplication] setNetworkActivityIndicatorVisible:YES];
 	}
 }
 
 -(void)stopNetwork
 {
-	if (OSAtomicDecrement32(&networkActivityCount))
+	ENSURE_UI_THREAD_0_ARGS;
+	networkActivityCount --;
+	if (networkActivityCount == 0)
 	{
-		[self changeNetworkStatus:[NSNumber numberWithBool:NO]];
+		[[UIApplication sharedApplication] setNetworkActivityIndicatorVisible:NO];
 	}
 }
 
@@ -122,8 +125,10 @@ void MyUncaughtExceptionHandler(NSException *exception)
 {
 	UIDeviceOrientation orientation = [[UIDevice currentDevice] orientation];
 	
-	if ([TiUtils isIPad]) {
-		UIImage* image = nil;
+	UIImage* image = nil;
+
+	if([TiUtils isIPad])
+	{
 		// Specific orientation check
 		switch (orientation) {
 			case UIDeviceOrientationPortrait:
@@ -142,7 +147,7 @@ void MyUncaughtExceptionHandler(NSException *exception)
 		if (image != nil) {
 			return image;
 		}
-		
+			
 		// Generic orientation check
 		if (UIDeviceOrientationIsPortrait(orientation)) {
 			image = [UIImage imageNamed:@"Default-Portrait.png"];
@@ -150,7 +155,7 @@ void MyUncaughtExceptionHandler(NSException *exception)
 		else if (UIDeviceOrientationIsLandscape(orientation)) {
 			image = [UIImage imageNamed:@"Default-Landscape.png"];
 		}
-		
+			
 		if (image != nil) {
 			return image;
 		}
@@ -162,17 +167,24 @@ void MyUncaughtExceptionHandler(NSException *exception)
 
 - (UIView*)attachSplash
 {
-	CGFloat splashY = -TI_STATUSBAR_HEIGHT;
-	if ([[UIApplication sharedApplication] isStatusBarHidden])
-	{
-		splashY = 0;
-	}
+	UIView * controllerView = [controller view];
+	
 	RELEASE_TO_NIL(loadView);
-	CGRect viewFrame = [[UIScreen mainScreen] bounds];
-	BOOL flipLandscape = ([TiUtils isIPad] && UIDeviceOrientationIsLandscape([[UIDevice currentDevice] orientation]));
-	loadView = [[UIImageView alloc] initWithFrame:CGRectMake(0, splashY, 
-															 flipLandscape ? viewFrame.size.height : viewFrame.size.width, 
-															 flipLandscape ? viewFrame.size.width : viewFrame.size.height)];
+
+	CGRect destRect;
+
+	if([TiUtils isIPad]) //iPad, 1024*748 or 748*1004, under the status bar.
+	{
+		destRect = [controllerView bounds];
+	}
+	else //iPhone: 320*480, placing behind the statusBar.
+	{
+		destRect = [controllerView convertRect:[[UIScreen mainScreen] bounds] fromView:nil];
+		destRect.origin.y -= [[UIApplication sharedApplication] statusBarFrame].size.height;
+	}
+
+	loadView = [[UIImageView alloc] initWithFrame:destRect];
+	[loadView setContentMode:UIViewContentModeScaleAspectFill];
 	loadView.image = [self loadAppropriateSplash];
 	[controller.view addSubview:loadView];
 	splashAttached = YES;
@@ -256,12 +268,6 @@ void MyUncaughtExceptionHandler(NSException *exception)
 	kjsBridge = [[KrollBridge alloc] initWithHost:self];
 	
 	[kjsBridge boot:self url:nil preload:nil];
-
-	WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
-	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardDidHide:) name:UIKeyboardDidHideNotification object:nil];
-	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardDidShow:) name:UIKeyboardDidShowNotification object:nil];
-	
-	
 #if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_4_0
 	if ([TiUtils isIOS4OrGreater])
 	{
@@ -290,6 +296,23 @@ void MyUncaughtExceptionHandler(NSException *exception)
 	NSSetUncaughtExceptionHandler(&MyUncaughtExceptionHandler);
 	[self initController];
 	[self boot];
+}
+
+- (void)generateNotification:(NSDictionary*)dict
+{
+	// Check and see if any keys from APS and the rest of the dictionary match; if they do, just
+	// bump out the dictionary as-is
+	remoteNotification = [[NSMutableDictionary alloc] initWithDictionary:dict];
+	NSDictionary* aps = [dict objectForKey:@"aps"];
+	for (id key in aps) 
+	{
+		if ([dict objectForKey:key] != nil) {
+			NSLog(@"[WARN] Conflicting keys in push APS dictionary and notification dictionary `%@`, not copying to toplevel from APS", key);
+			continue;
+		}
+		[remoteNotification setValue:[aps valueForKey:key] forKey:key];
+	}
+	NSLog(@"[WARN] Accessing APS keys from toplevel of notification is deprecated");
 }
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions_
@@ -328,7 +351,7 @@ void MyUncaughtExceptionHandler(NSException *exception)
 	}
 	if (notification!=nil)
 	{
-		remoteNotification = [[notification objectForKey:@"aps"] retain];
+		[self generateNotification:notification];
 	}
 	
 	[self boot];
@@ -357,11 +380,16 @@ void MyUncaughtExceptionHandler(NSException *exception)
 
 	//These shutdowns return immediately, yes, but the main will still run the close that's in their queue.	
 	[kjsBridge shutdown:condition];
-	
+
+	// THE CODE BELOW IS WRONG.
+	// It only waits until ONE context has signialed that it has shut down; then we proceed along our merry way.
+	// This might lead to problems like contexts not getting cleaned up properly due to premature app termination.
+	// Plus, it blocks the main thread... meaning that we can have deadlocks if any context is currently executing
+	// a request that requires operations on the main thread.
 	[condition lock];
 	[condition waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:SHUTDOWN_TIMEOUT_IN_SEC]];
 	[condition unlock];
-	
+
 	//This will shut down the modules.
 	[theNotificationCenter postNotificationName:kTiShutdownNotification object:self];
 	
@@ -399,10 +427,9 @@ void MyUncaughtExceptionHandler(NSException *exception)
 
 - (void)applicationDidBecomeActive:(UIApplication *)application
 {
-	// you can get a resign when you have to show a system dialog or you get
-	// an incoming call, for example, and then you'll get this message afterwards
-	// this is slightly different than enter foreground
-	[[NSNotificationCenter defaultCenter] postNotificationName:kTiResumeNotification object:self];
+	// NOTE: Have to fire a separate but non-'resume' event here because there is SOME information
+	// (like new URL) that is not passed through as part of the normal foregrounding process.
+	[[NSNotificationCenter defaultCenter] postNotificationName:kTiResumedNotification object:self];
 	
 	// resume any image loading
 	[[ImageLoader sharedLoader] resume];
@@ -411,12 +438,53 @@ void MyUncaughtExceptionHandler(NSException *exception)
 -(void)applicationDidEnterBackground:(UIApplication *)application
 {
 	[TiUtils queueAnalytics:@"ti.background" name:@"ti.background" data:nil];
+
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_4_0
+	
+	if (backgroundServices==nil)
+	{
+		return;
+	}
+	
+	UIApplication* app = [UIApplication sharedApplication];
+	TiApp *tiapp = self;
+	bgTask = [app beginBackgroundTaskWithExpirationHandler:^{
+        // Synchronize the cleanup call on the main thread in case
+        // the task actually finishes at around the same time.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (bgTask != UIBackgroundTaskInvalid)
+            {
+                [app endBackgroundTask:bgTask];
+                bgTask = UIBackgroundTaskInvalid;
+            }
+        });
+    }];
+	// Start the long-running task and return immediately.
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+		
+        // Do the work associated with the task.
+		[tiapp beginBackgrounding];
+    });
+#endif	
+	
 }
 
 -(void)applicationWillEnterForeground:(UIApplication *)application
 {
 	[[NSNotificationCenter defaultCenter] postNotificationName:kTiResumeNotification object:self];
+	
 	[TiUtils queueAnalytics:@"ti.foreground" name:@"ti.foreground" data:nil];
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_4_0
+	
+	if (backgroundServices==nil)
+	{
+		return;
+	}
+	
+	[self endBackgrounding];
+	
+#endif
+
 }
 
 -(id)remoteNotification
@@ -432,7 +500,7 @@ void MyUncaughtExceptionHandler(NSException *exception)
 	// otherwise, if the app is started from a push notification, this method will not be 
 	// called
 	RELEASE_TO_NIL(remoteNotification);
-	remoteNotification = [[userInfo objectForKey:@"aps"] retain];
+	[self generateNotification:userInfo];
 	
 	if (remoteNotificationDelegate!=nil)
 	{
@@ -558,9 +626,6 @@ void MyUncaughtExceptionHandler(NSException *exception)
 
 - (void)dealloc 
 {
-	WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
-	[[NSNotificationCenter defaultCenter] removeObserver:self name:UIKeyboardDidHideNotification object:nil];
-	[[NSNotificationCenter defaultCenter] removeObserver:self name:UIKeyboardDidShowNotification object:nil];
 	RELEASE_TO_NIL(kjsBridge);
 #ifdef USE_TI_UIWEBVIEW
 	RELEASE_TO_NIL(xhrBridge);
@@ -575,6 +640,10 @@ void MyUncaughtExceptionHandler(NSException *exception)
 #ifdef DEBUGGER_ENABLED
 	[[TiDebugger sharedDebugger] stop];
 #endif
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_4_0
+	RELEASE_TO_NIL(backgroundServices);
+	RELEASE_TO_NIL(localNotification);
+#endif	
 	[super dealloc];
 }
 
@@ -591,11 +660,6 @@ void MyUncaughtExceptionHandler(NSException *exception)
 	return userAgent;
 }
 
--(BOOL)isKeyboardShowing
-{
-	return keyboardShowing;
-}
-
 -(NSString*)remoteDeviceUUID
 {
 	return remoteDeviceUUID;
@@ -606,21 +670,88 @@ void MyUncaughtExceptionHandler(NSException *exception)
 	return sessionId;
 }
 
-#pragma mark Keyboard Delegates
-
-- (void)keyboardDidHide:(NSNotification*)notification 
-{
-	keyboardShowing = NO;
-}
-
-- (void)keyboardDidShow:(NSNotification*)notification
-{
-	keyboardShowing = YES;
-}
-
 -(KrollBridge*)krollBridge
 {
 	return kjsBridge;
 }
+
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_4_0
+
+#pragma mark Backgrounding
+
+-(void)beginBackgrounding
+{
+	runningServices = [[NSMutableArray alloc] initWithCapacity:[backgroundServices count]];
+	
+	for (TiProxy *proxy in backgroundServices)
+	{
+		[runningServices addObject:proxy];
+		[proxy performSelector:@selector(beginBackground)];
+	}
+}
+
+-(void)endBackgrounding
+{
+	for (TiProxy *proxy in backgroundServices)
+	{
+		[proxy performSelector:@selector(endBackground)];
+		[runningServices removeObject:proxy];
+	}
+	
+	RELEASE_TO_NIL(runningServices);
+}
+
+- (void)application:(UIApplication *)application didReceiveLocalNotification:(UILocalNotification *)notification
+{
+	RELEASE_TO_NIL(localNotification);
+	localNotification = [notification retain];
+	[[NSNotificationCenter defaultCenter] postNotificationName:kTiLocalNotification object:notification userInfo:nil];
+}
+
+-(UILocalNotification*)localNotification
+{
+	return localNotification;
+}
+
+-(void)registerBackgroundService:(TiProxy*)proxy
+{
+	if (backgroundServices==nil)
+	{
+		backgroundServices = [[NSMutableArray alloc] initWithCapacity:1];
+	}
+	[backgroundServices addObject:proxy];
+}
+
+-(void)unregisterBackgroundService:(TiProxy*)proxy
+{
+	[backgroundServices removeObject:proxy];
+	if ([backgroundServices count]==0)
+	{
+		RELEASE_TO_NIL(backgroundServices);
+	}
+}
+
+-(void)stopBackgroundService:(TiProxy *)proxy
+{
+	[runningServices removeObject:proxy];
+	[backgroundServices removeObject:proxy];
+	
+	if ([runningServices count] == 0)
+	{
+		RELEASE_TO_NIL(runningServices);
+		
+		// Synchronize the cleanup call on the main thread in case
+		// the expiration handler is fired at the same time.
+		dispatch_async(dispatch_get_main_queue(), ^{
+			if (bgTask != UIBackgroundTaskInvalid)
+			{
+				[[UIApplication sharedApplication] endBackgroundTask:bgTask];
+				bgTask = UIBackgroundTaskInvalid;
+			}
+		});
+	}
+}
+
+#endif
 
 @end

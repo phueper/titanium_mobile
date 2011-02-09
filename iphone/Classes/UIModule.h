@@ -25,6 +25,9 @@
 #ifdef USE_TI_UIIOS
 	TiProxy *ios;
 #endif
+#ifdef USE_TI_UICLIPBOARD	
+	TiProxy *clipboard;
+#endif
 }
 
 //TODO: review these, maybe they need to go on iPhone Animation Style - however, they are platform generic
@@ -59,6 +62,7 @@
 @property(nonatomic,readonly) NSNumber *KEYBOARD_NUMBERS_PUNCTUATION;
 @property(nonatomic,readonly) NSNumber *KEYBOARD_URL;
 @property(nonatomic,readonly) NSNumber *KEYBOARD_NUMBER_PAD;
+@property(nonatomic,readonly) NSNumber *KEYBOARD_DECIMAL_PAD;
 @property(nonatomic,readonly) NSNumber *KEYBOARD_PHONE_PAD;
 @property(nonatomic,readonly) NSNumber *KEYBOARD_NAMEPHONE_PAD;
 @property(nonatomic,readonly) NSNumber *KEYBOARD_EMAIL;
@@ -128,6 +132,8 @@
 @property(nonatomic,readonly) NSNumber *AUTODETECT_ALL;
 @property(nonatomic,readonly) NSNumber *AUTODETECT_PHONE;
 @property(nonatomic,readonly) NSNumber *AUTODETECT_LINK;
+@property(nonatomic,readonly) NSNumber *AUTODETECT_ADDRESS;
+@property(nonatomic,readonly) NSNumber *AUTODETECT_CALENDAR;
 
 
 
@@ -153,6 +159,10 @@
 
 #ifdef USE_TI_UIIOS
 @property(nonatomic,readonly)			TiProxy* iOS;
+#endif
+
+#ifdef USE_TI_UICLIPBOARD
+@property(nonatomic,readonly)			TiProxy* Clipboard;
 #endif
 
 @end

@@ -23,7 +23,7 @@ const UIControlEvents unHighlightingTouches = UIControlEventTouchCancel|UIContro
 
 -(void)dealloc
 {
-	[button removeTarget:self action:@selector(clicked:) forControlEvents:UIControlEventTouchUpInside];
+	[button removeTarget:self action:@selector(clicked:event:) forControlEvents:UIControlEventTouchUpInside];
 	[button removeTarget:self action:@selector(highlightOn:) forControlEvents:highlightingTouches];
 	[button removeTarget:self action:@selector(highlightOff:) forControlEvents:unHighlightingTouches];
 	RELEASE_TO_NIL(button);
@@ -88,15 +88,20 @@ const UIControlEvents unHighlightingTouches = UIControlEventTouchCancel|UIContro
 
 -(void)frameSizeChanged:(CGRect)frame bounds:(CGRect)bounds
 {
-	[TiUtils setView:self positionRect:CGRectIntegral([TiUtils viewPositionRect:self])];
-	[TiUtils setView:button positionRect:bounds];
+	[button setFrame:bounds];
 }
 
--(void)clicked:(id)event
+-(void)clicked:(id)sender event:(UIEvent*)event
 {
 	if ([self.proxy _hasListeners:@"click"])
 	{
-		[self.proxy fireEvent:@"click" withObject:nil];
+		// TODO: This is not cool.  It COULD be that any control with 'specialized' handling like buttons does not report the same information as TiUIViews!
+		// For now, let's just hack in some x and y...
+		UITouch* touch = [[event touchesForView:sender] anyObject];
+		NSMutableDictionary *evt = [NSMutableDictionary dictionaryWithDictionary:[TiUtils pointToDictionary:[touch locationInView:self]]];
+		[evt setValue:[TiUtils pointToDictionary:[touch locationInView:nil]] forKey:@"globalPoint"];
+		
+		[self.proxy fireEvent:@"click" withObject:evt];
 	}
 }
 
@@ -115,7 +120,7 @@ const UIControlEvents unHighlightingTouches = UIControlEventTouchCancel|UIContro
 		{
 			[button setTitleColor:[UIColor whiteColor] forState:UIControlStateHighlighted];
 		}
-		[button addTarget:self action:@selector(clicked:) forControlEvents:UIControlEventTouchUpInside];
+		[button addTarget:self action:@selector(clicked:event:) forControlEvents:UIControlEventTouchUpInside];
 		[button addTarget:self action:@selector(highlightOn:) forControlEvents:highlightingTouches];
 		[button addTarget:self action:@selector(highlightOff:) forControlEvents:unHighlightingTouches];
 	}
@@ -151,6 +156,8 @@ const UIControlEvents unHighlightingTouches = UIControlEventTouchCancel|UIContro
 		[[self button] setImage:image forState:UIControlStateNormal];
 		
 		// if the layout is undefined or auto, we need to take the size of the image
+		//TODO: Refactor. This will cause problems if there's multiple setImages called,
+		//Since we change the values of the proxy.
 		LayoutConstraint *layout = [(TiViewProxy *)[self proxy] layoutProperties];
 		BOOL reposition = NO;
 		
@@ -167,7 +174,7 @@ const UIControlEvents unHighlightingTouches = UIControlEventTouchCancel|UIContro
 		}
 		if (reposition)
 		{
-			[(TiViewProxy *)[self proxy] setNeedsReposition];
+			[(TiViewProxy *)[self proxy] contentsWillChange];			
 		}
 	}
 	else
@@ -251,6 +258,25 @@ const UIControlEvents unHighlightingTouches = UIControlEventTouchCancel|UIContro
 		{
 			[b setTitleColor:[UIColor whiteColor] forState:UIControlStateHighlighted];
 		}
+	}
+}
+
+-(void)setTextAlign_:(id)align
+{
+	UIButton *b = [self button];
+	if ([align isEqual:@"left"])
+	{
+		b.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
+		b.contentEdgeInsets = UIEdgeInsetsMake(0,10,0,0);
+	}
+	else if ([align isEqual:@"right"])
+	{
+		b.contentHorizontalAlignment = UIControlContentHorizontalAlignmentRight;
+		b.contentEdgeInsets = UIEdgeInsetsMake(0,0,10,0);
+	}
+	else if ([align isEqual:@"center"])
+	{
+		b.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
 	}
 }
 

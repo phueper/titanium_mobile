@@ -10,6 +10,7 @@
 #import "KrollTimer.h"
 #import "KrollCallback.h"
 #import "TiUtils.h"
+#import "TiLocale.h"
 
 #ifdef DEBUGGER_ENABLED
 	#import "TiDebuggerContext.h"
@@ -167,6 +168,298 @@ static TiValueRef CommonJSRequireCallback (TiContextRef jsContext, TiObjectRef j
 	}
 }	
 
+static TiValueRef LCallback (TiContextRef jsContext, TiObjectRef jsFunction, TiObjectRef jsThis, size_t argCount,
+										   const TiValueRef args[], TiValueRef* exception)
+{
+	if (argCount<1)
+	{
+		return ThrowException(jsContext, @"invalid number of arguments", exception);
+	}
+	
+	KrollContext *ctx = GetKrollContext(jsContext);
+	NSString* key = [KrollObject toID:ctx value:args[0]];
+	NSString* comment = argCount > 1 ? [KrollObject toID:ctx value:args[1]] : nil;
+	@try 
+	{
+		id result = [TiLocale getString:key comment:comment];
+		return [KrollObject toValue:ctx value:result];
+	}
+	@catch (NSException * e) 
+	{
+		return ThrowException(jsContext, [e reason], exception);
+	}
+}	
+
+static TiValueRef StringFormatCallback (TiContextRef jsContext, TiObjectRef jsFunction, TiObjectRef jsThis, size_t argCount,
+							 const TiValueRef args[], TiValueRef* exception)
+{
+	if (argCount<2)
+	{
+		return ThrowException(jsContext, @"invalid number of arguments", exception);
+	}
+	
+	KrollContext *ctx = GetKrollContext(jsContext);
+	NSString* format = [KrollObject toID:ctx value:args[0]];
+	
+	// convert string references to objects
+	format = [format stringByReplacingOccurrencesOfString:@"%s" withString:@"%@"];
+	// we're dealing with double, so convert so that it formats right 
+	format = [format stringByReplacingOccurrencesOfString:@"%d" withString:@"%1.0f"];
+	
+	@try 
+	{
+		int size = 0;
+		// we have to walk each type to detect the right size and alignment
+		for (size_t x = 1; x < argCount; x++)
+		{
+			TiValueRef valueRef = args[x];
+			if (TiValueIsString(jsContext,valueRef)||TiValueIsObject(jsContext, valueRef))
+			{
+				size+=sizeof(id);
+			}
+			else if (TiValueIsNumber(jsContext, valueRef))
+			{
+				size+=sizeof(double);
+			}
+			else if (TiValueIsBoolean(jsContext, valueRef))
+			{
+				size+=sizeof(bool);
+			}
+		}
+		char* argList = (char *)malloc(size);
+		char* bm = argList; // copy pointer since we move the other forward
+		for (size_t x = 1; x < argCount; x++)
+		{
+			TiValueRef valueRef = args[x];
+			if (TiValueIsString(jsContext,valueRef)||TiValueIsObject(jsContext, valueRef))
+			{
+				(*(id*)argList) = [KrollObject toID:ctx value:valueRef];
+				argList += sizeof(id);
+			}
+			else if (TiValueIsNumber(jsContext, valueRef))
+			{
+				(*(double*)argList) = TiValueToNumber(jsContext, valueRef, NULL);
+				argList += sizeof(double);
+			}
+			else if (TiValueIsBoolean(jsContext, valueRef))
+			{
+				(*(bool*)argList) = TiValueToBoolean(jsContext,valueRef);
+				argList += sizeof(bool);
+			}
+		}
+		NSString* result = [[NSString alloc] initWithFormat:format arguments:bm];
+		TiValueRef value = [KrollObject toValue:ctx value:result];
+		free(bm);
+		[result release];
+		return value;
+	}
+	@catch (NSException * e) 
+	{
+		return ThrowException(jsContext, [e reason], exception);
+	}
+}	
+
+static TiValueRef StringFormatDateCallback (TiContextRef jsContext, TiObjectRef jsFunction, TiObjectRef jsThis, size_t argCount,
+										const TiValueRef args[], TiValueRef* exception)
+{
+	if (argCount<1)
+	{
+		return ThrowException(jsContext, @"invalid number of arguments", exception);
+	}
+	
+	KrollContext *ctx = GetKrollContext(jsContext);
+	NSDate* date = [KrollObject toID:ctx value:args[0]];
+	NSDateFormatterStyle style = NSDateFormatterShortStyle;
+	
+	if (argCount>1)
+	{
+		NSString *s = [KrollObject toID:ctx value:args[1]];
+		if ([s isEqualToString:@"short"])
+		{
+			// default
+		}
+		else if ([s isEqualToString:@"medium"])
+		{
+			style = NSDateFormatterMediumStyle;
+		}
+		else if ([s isEqualToString:@"long"])
+		{
+			style = NSDateFormatterLongStyle;
+		}
+	}
+	
+	@try 
+	{
+		NSString* result;
+		// Only available in iOS4+
+		if ([TiUtils isIOS4OrGreater]) {
+			result = [NSDateFormatter localizedStringFromDate:date dateStyle:style timeStyle:NSDateFormatterNoStyle];
+		}
+		else {
+			NSLocale* locale = [NSLocale currentLocale];
+			NSDateFormatter* formatter = [[[NSDateFormatter alloc] init] autorelease];
+			[formatter setLocale:locale];
+			[formatter setDateStyle:style];
+			[formatter setTimeStyle:NSDateFormatterNoStyle];
+			result = [formatter stringFromDate:date];
+		}
+		TiValueRef value = [KrollObject toValue:ctx value:result];
+		return value;
+	}
+	@catch (NSException * e) 
+	{
+		return ThrowException(jsContext, [e reason], exception);
+	}
+}	
+
+static TiValueRef StringFormatTimeCallback (TiContextRef jsContext, TiObjectRef jsFunction, TiObjectRef jsThis, size_t argCount,
+											const TiValueRef args[], TiValueRef* exception)
+{
+	if (argCount<1)
+	{
+		return ThrowException(jsContext, @"invalid number of arguments", exception);
+	}
+	
+	KrollContext *ctx = GetKrollContext(jsContext);
+	NSDate* date = [KrollObject toID:ctx value:args[0]];
+	NSDateFormatterStyle style = NSDateFormatterShortStyle;
+	
+	if (argCount>1)
+	{
+		NSString *s = [KrollObject toID:ctx value:args[1]];
+		if ([s isEqualToString:@"short"])
+		{
+			// default
+		}
+		else if ([s isEqualToString:@"medium"])
+		{
+			style = NSDateFormatterMediumStyle;
+		}
+		else if ([s isEqualToString:@"long"])
+		{
+			style = NSDateFormatterLongStyle;
+		}
+	}
+	
+	@try 
+	{
+		NSString* result;
+		if ([TiUtils isIOS4OrGreater]) {
+			result = [NSDateFormatter localizedStringFromDate:date dateStyle:NSDateFormatterNoStyle timeStyle:style];
+		}
+		else {
+			NSLocale* locale = [NSLocale currentLocale];
+			NSDateFormatter* formatter = [[[NSDateFormatter alloc] init] autorelease];
+			[formatter setLocale:locale];
+			[formatter setDateStyle:NSDateFormatterNoStyle];
+			[formatter setTimeStyle:style];
+			result = [formatter stringFromDate:date];
+		}
+		TiValueRef value = [KrollObject toValue:ctx value:result];
+		return value;
+	}
+	@catch (NSException * e) 
+	{
+		return ThrowException(jsContext, [e reason], exception);
+	}
+}	
+
+static TiValueRef StringFormatCurrencyCallback (TiContextRef jsContext, TiObjectRef jsFunction, TiObjectRef jsThis, size_t argCount,
+											const TiValueRef args[], TiValueRef* exception)
+{
+	if (argCount<1)
+	{
+		return ThrowException(jsContext, @"invalid number of arguments", exception);
+	}
+	
+	KrollContext *ctx = GetKrollContext(jsContext);
+	NSNumber* number = [KrollObject toID:ctx value:args[0]];
+	
+	@try 
+	{
+		NSString* result;
+		if ([TiUtils isIOS4OrGreater]) {
+			result = [NSNumberFormatter localizedStringFromNumber:number numberStyle:NSNumberFormatterCurrencyStyle];
+		}
+		else {
+			NSNumberFormatter* formatter = [[[NSNumberFormatter alloc] init] autorelease];
+			NSLocale* locale = [NSLocale currentLocale];
+			[formatter setNumberStyle:NSNumberFormatterCurrencyStyle];
+			result = [formatter stringFromNumber:number];
+		}
+		TiValueRef value = [KrollObject toValue:ctx value:result];
+		return value;
+	}
+	@catch (NSException * e) 
+	{
+		return ThrowException(jsContext, [e reason], exception);
+	}
+}	
+
+static TiValueRef StringFormatDecimalCallback (TiContextRef jsContext, TiObjectRef jsFunction, TiObjectRef jsThis, size_t argCount,
+												const TiValueRef args[], TiValueRef* exception)
+{
+	if (argCount<1)
+	{
+		return ThrowException(jsContext, @"invalid number of arguments", exception);
+	}
+	
+	KrollContext *ctx = GetKrollContext(jsContext);
+	NSNumber* number = [KrollObject toID:ctx value:args[0]];
+	
+	@try 
+	{
+		NSString* result;
+		NSLocale* locale = nil;
+		NSString* formatString = nil;
+		if (argCount > 1) 
+		{
+			NSString* arg = [KrollObject toID:ctx value:args[1]];
+			if ([arg rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"0#.,"]].location != NSNotFound) {
+				formatString = arg;
+			}
+			else {
+				locale = [[[NSLocale alloc] initWithLocaleIdentifier:arg] autorelease];
+			}
+		}
+		// If locale is nil, either: Single argument, or the second arg is format string and not locale ID.
+		if (locale == nil) {
+			locale = [NSLocale currentLocale];
+		}
+		
+		NSNumberFormatter* formatter = [[[NSNumberFormatter alloc] init] autorelease];
+		
+		[formatter setLocale:locale];
+		[formatter setNumberStyle:NSNumberFormatterDecimalStyle];
+
+		// Format handling to match the extremely vague android specs
+		if (argCount == 3)
+		{
+			formatString = [KrollObject toID:ctx value:args[2]];
+		}
+		
+		if (formatString != nil) {
+			NSArray* formats = [formatString componentsSeparatedByString:@";"];
+			[formatter setPositiveFormat:[formats objectAtIndex:0]];
+			if ([formats count] > 1) {
+				[formatter setNegativeFormat:[formats objectAtIndex:1]];
+			}
+			else {
+				[formatter setNegativeFormat:[formats objectAtIndex:0]];
+			}
+		}
+		
+		result = [formatter stringFromNumber:number];			
+
+		TiValueRef value = [KrollObject toValue:ctx value:result];
+		return value;
+	}
+	@catch (NSException * e) 
+	{
+		return ThrowException(jsContext, [e reason], exception);
+	}
+}	
+
 
 @implementation KrollEval
 
@@ -280,7 +573,7 @@ static TiValueRef CommonJSRequireCallback (TiContextRef jsContext, TiObjectRef j
 		stopped = YES;
 		KrollContextCount++;
 		
-		WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+		WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
 		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(suspend:) name:kTiSuspendNotification object:nil];
 		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(resume:) name:kTiResumeNotification object:nil];
 	}
@@ -332,7 +625,7 @@ static TiValueRef CommonJSRequireCallback (TiContextRef jsContext, TiObjectRef j
 #if CONTEXT_MEMORY_DEBUG==1
 	NSLog(@"DEALLOC: %@",self);
 #endif
-	WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+	WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
 	[[NSNotificationCenter defaultCenter] removeObserver:self name:kTiSuspendNotification object:nil];
 	[[NSNotificationCenter defaultCenter] removeObserver:self name:kTiResumeNotification object:nil];
 	assert(!destroyed);
@@ -417,14 +710,18 @@ static TiValueRef CommonJSRequireCallback (TiContextRef jsContext, TiObjectRef j
 - (void)suspend:(id)note
 {
 	[condition lock];
+	VerboseLog(@"Will suspend %@ %@",self,CODELOCATION);
 	suspended = YES;
+	VerboseLog(@"Did suspend %@ %@",self,CODELOCATION);
 	[condition unlock];
 }
 
 - (void)resume:(id)note
 {
 	[condition lock];
+	VerboseLog(@"Will resume-signalling %@ %@",self,CODELOCATION);
 	suspended = NO;
+	VerboseLog(@"Did resume; signalling %@ %@",self,CODELOCATION);
 	[condition signal];
 	[condition unlock];
 }
@@ -535,7 +832,7 @@ static TiValueRef CommonJSRequireCallback (TiContextRef jsContext, TiObjectRef j
 {
 	// create the invoker bridge
 	TiStringRef invokerFnName = TiStringCreateWithUTF8CString([name UTF8String]);
-	TiValueRef invoker = TiObjectMakeFunctionWithCallback(context, NULL, fn);
+	TiValueRef invoker = TiObjectMakeFunctionWithCallback(context, invokerFnName, fn);
 	if (invoker)
 	{
 		TiObjectRef global = TiContextGetGlobalObject(context); 
@@ -586,12 +883,75 @@ static TiValueRef CommonJSRequireCallback (TiContextRef jsContext, TiObjectRef j
 	bool set = TiObjectSetPrivate(krollObj, self);
 	assert(set);
 	[kroll release];
+	TiStringRelease(prop);
 	
 	[self bindCallback:@"setTimeout" callback:&SetTimeoutCallback];
 	[self bindCallback:@"setInterval" callback:&SetIntervalCallback];
 	[self bindCallback:@"clearTimeout" callback:&ClearTimerCallback];
 	[self bindCallback:@"clearInterval" callback:&ClearTimerCallback];
 	[self bindCallback:@"require" callback:&CommonJSRequireCallback];
+	[self bindCallback:@"L" callback:&LCallback];
+
+	prop = TiStringCreateWithUTF8CString("String");
+	
+	// create a special method -- String.format -- that will act as a string formatter
+	TiStringRef formatName = TiStringCreateWithUTF8CString([@"format" UTF8String]);
+	TiValueRef invoker = TiObjectMakeFunctionWithCallback(context, formatName, &StringFormatCallback);
+	TiValueRef stringValueRef=TiObjectGetProperty(context, globalRef, prop, NULL);
+	TiObjectRef stringRef = TiValueToObject(context, stringValueRef, NULL);
+	TiObjectSetProperty(context, stringRef,   
+						formatName, invoker,   
+						kTiPropertyAttributeReadOnly | kTiPropertyAttributeDontDelete,   
+						NULL); 
+	TiStringRelease(formatName);	
+
+	
+	// create a special method -- String.formatDate -- that will act as a date formatter
+	formatName = TiStringCreateWithUTF8CString([@"formatDate" UTF8String]);
+	invoker = TiObjectMakeFunctionWithCallback(context, formatName, &StringFormatDateCallback);
+	stringValueRef=TiObjectGetProperty(context, globalRef, prop, NULL);
+	stringRef = TiValueToObject(context, stringValueRef, NULL);
+	TiObjectSetProperty(context, stringRef,   
+						formatName, invoker,   
+						kTiPropertyAttributeReadOnly | kTiPropertyAttributeDontDelete,   
+						NULL); 
+	TiStringRelease(formatName);	
+
+	// create a special method -- String.formatTime -- that will act as a time formatter
+	formatName = TiStringCreateWithUTF8CString([@"formatTime" UTF8String]);
+	invoker = TiObjectMakeFunctionWithCallback(context, formatName, &StringFormatTimeCallback);
+	stringValueRef=TiObjectGetProperty(context, globalRef, prop, NULL);
+	stringRef = TiValueToObject(context, stringValueRef, NULL);
+	TiObjectSetProperty(context, stringRef,   
+						formatName, invoker,   
+						kTiPropertyAttributeReadOnly | kTiPropertyAttributeDontDelete,   
+						NULL); 
+	TiStringRelease(formatName);	
+	
+	// create a special method -- String.formatDecimal -- that will act as a decimal formatter
+	formatName = TiStringCreateWithUTF8CString([@"formatDecimal" UTF8String]);
+	invoker = TiObjectMakeFunctionWithCallback(context, formatName, &StringFormatDecimalCallback);
+	stringValueRef=TiObjectGetProperty(context, globalRef, prop, NULL);
+	stringRef = TiValueToObject(context, stringValueRef, NULL);
+	TiObjectSetProperty(context, stringRef,   
+						formatName, invoker,   
+						kTiPropertyAttributeReadOnly | kTiPropertyAttributeDontDelete,   
+						NULL); 
+	TiStringRelease(formatName);	
+
+	// create a special method -- String.formatCurrency -- that will act as a currency formatter
+	formatName = TiStringCreateWithUTF8CString([@"formatCurrency" UTF8String]);
+	invoker = TiObjectMakeFunctionWithCallback(context, formatName, &StringFormatCurrencyCallback);
+	stringValueRef=TiObjectGetProperty(context, globalRef, prop, NULL);
+	stringRef = TiValueToObject(context, stringValueRef, NULL);
+	TiObjectSetProperty(context, stringRef,   
+						formatName, invoker,   
+						kTiPropertyAttributeReadOnly | kTiPropertyAttributeDontDelete,   
+						NULL); 
+	TiStringRelease(formatName);	
+	
+	
+	TiStringRelease(prop);
 	
 	if (delegate!=nil && [delegate respondsToSelector:@selector(willStartNewContext:)])
 	{
@@ -610,15 +970,20 @@ static TiValueRef CommonJSRequireCallback (TiContextRef jsContext, TiObjectRef j
 	
 	while(1)
 	{
+		NSAutoreleasePool *innerpool = [[NSAutoreleasePool alloc] init];
 		loopCount++;
 		
 		// if we're suspended, we simply wait for resume
 		if (suspended)
 		{
 			[condition lock];
-			if (suspended)
+			//TODO: Suspended currently only is set on app pause/resume. We should have it happen whenever a JS thread
+			//should be paused. Paused being no timers waiting, no events being triggered, no code to execute.
+			if (suspended && ([queue count] == 0))
 			{
+				VerboseLog(@"Waiting: %@",self);
 				[condition wait];
+				VerboseLog(@"Resumed! %@",self)
 			} 
 			[condition unlock];
 		}
@@ -711,7 +1076,6 @@ static TiValueRef CommonJSRequireCallback (TiContextRef jsContext, TiObjectRef j
 			}
 		}
 
-		
 		// TODO: experiment, attempt to collect more often than usual given our environment
 		if (loopCount == GC_LOOP_COUNT)
 		{
@@ -726,6 +1090,7 @@ static TiValueRef CommonJSRequireCallback (TiContextRef jsContext, TiObjectRef j
 		// we can now immediately exit
 		if (exit_after_flush)
 		{
+			RELEASE_TO_NIL(innerpool);
 			break;
 		}
 		
@@ -742,14 +1107,15 @@ static TiValueRef CommonJSRequireCallback (TiContextRef jsContext, TiObjectRef j
 		{
 			// wait only 10 seconds and then loop, this will allow us to garbage
 			// collect every so often
-			//[condition waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:60]];		
-			[condition wait];
+			[condition waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:10]];		
 		}
 		[condition unlock]; 
 		
 #if CONTEXT_DEBUG == 1	
 		NSLog(@"CONTEXT<%@>: woke up for new event (count=%d)",self,KrollContextCount);
 #endif
+		
+		RELEASE_TO_NIL(innerpool);
 	}
 
 #if CONTEXT_DEBUG == 1	

@@ -4,6 +4,7 @@ var win = Titanium.UI.currentWindow;
 // on first otherwise it will report -1.  if you
 // add a battery listener, it will turn it on for you
 // automagically
+var needUpdate = false;
 Titanium.Platform.batteryMonitoring = true;
 
 win.addEventListener('close',function()
@@ -148,6 +149,10 @@ var l9 = Titanium.UI.createLabel({
 
 win.add(l9);
 
+if (Titanium.Platform.batteryState == Ti.Platform.BATTERY_STATE_UNKNOWN) {
+	needUpdate = true;
+}
+
 var l11 = Titanium.UI.createLabel({
 	text:'battery state:' + batteryStateToString(Titanium.Platform.batteryState),
 	top:190,
@@ -242,31 +247,35 @@ win.add(b);
 var openURL=1;
 b.addEventListener('click', function()
 {
-	switch(openURL)
+	var url;
+	switch(openURL % 3)
 	{
 		case 0:
 		{
-			Titanium.Platform.openURL('http://www.google.com');
+			url = 'http://www.google.com';
 			b.title='Open URL (web)';
-			openURL++;
 			break;
 		}
 		case 1:
 		{
-			Titanium.Platform.openURL('tel:4043332222');
+			url = 'tel:4043332222';
 			b.title='Open URL (tel)';
-			openURL++;
 			break;
 		}
 		case 2:
 		{
-			Titanium.Platform.openURL('sms:4043332222');
+			url = 'sms:4043332222'
 			b.title='Open URL (sms)';
-			openURL=0;
 			break;
 		}
-
 	}
+	if (Titanium.Platform.name != 'android') {
+		if (!Titanium.Platform.canOpenURL(url)) {
+			Ti.API.warn("Can't open url: "+url);
+		}
+	}
+	Titanium.Platform.openURL(url);
+	openURL++;
 });
 
 //
@@ -274,10 +283,15 @@ b.addEventListener('click', function()
 //
 Titanium.Platform.addEventListener('battery', function(e)
 {
-	//TODO: based on various reports from the google, you only get battery state changes
-	//at 5% intervals.... to test this, you gotta unplug and leave your phone sitting for awhile
-	var message = 'Battery Notification\n\nLevel: ' + e.level + ', State: '+batteryStateToString(e.state);
-	Titanium.UI.createAlertDialog({title:'Platform', message:message}).show();
+	if (needUpdate) {
+		l11.text = 'battery state:' + batteryStateToString(e.state);
+		l12.text = 'battery level:' + e.level;
+	} else {
+		//TODO: based on various reports from the google, you only get battery state changes
+		//at 5% intervals.... to test this, you gotta unplug and leave your phone sitting for awhile
+		var message = 'Battery Notification\n\nLevel: ' + e.level + ', State: '+batteryStateToString(e.state);
+		Titanium.UI.createAlertDialog({title:'Platform', message:message}).show();
+	}
 });
 
 Titanium.API.info("Current Phone Locale is "+Titanium.Platform.locale);

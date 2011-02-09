@@ -12,6 +12,7 @@
 #import "SBJSON.h"
 #import <sys/utsname.h>
 #import "NSData+Additions.h"
+#import "Reachability.h"
 
 //TODO:
 //
@@ -81,60 +82,79 @@ NSString * const TI_DB_VERSION = @"1";
 -(void)backgroundFlushEventQueue
 {
 	// place the flush on a background thread so it doesn't need to block the main UI thread
-	[NSThread detachNewThreadSelector:@selector(flushEventQueue) toTarget:self withObject:nil];
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_4_0
+	// flushEventQueueWrapper is only defined when compiling for 4.0 and greater - otherwise we get hella crashes.
+	SEL queueFlusher = [TiUtils isIOS4OrGreater] ? @selector(flushEventQueueWrapper) : @selector(flushEventQueue);
+#else
+	SEL queueFlusher = @selector(flushEventQueue);
+#endif
+	[NSThread detachNewThreadSelector:queueFlusher toTarget:self withObject:nil];
+}
+
+-(void)requeueEventsOnTimer
+{
+	[lock lock];
+	NSError *error = nil;
+	
+	[database beginTransaction];
+	
+	// get the number of attempts
+	PLSqliteResultSet *rs = (PLSqliteResultSet*)[database executeQuery:@"select attempts from last_attempt"];
+	BOOL found = [rs next];
+	int count = found ? [rs intForColumn:@"attempts"] : 0;
+	[rs close];
+	
+	if (count == TI_DB_WARN_ON_ATTEMPT_COUNT)
+	{
+		NSLog(@"[ERROR] %d analytics events attempted with no luck",count);
+	}
+	
+	NSString *sql = count == 0 ? @"insert into last_attempt VALUES (?,?)" : @"update last_attempt set date = ?, attempts = ?";
+	PLSqlitePreparedStatement * statement = (PLSqlitePreparedStatement *) [database prepareStatement:sql error:&error];
+	[statement bindParameters:[NSArray arrayWithObjects:[NSDate date],NUMINT(count+1),nil]];
+	[statement executeUpdate];
+	[database commitTransaction];
+	
+	[statement close];
+	
+	if (retryTimer==nil)
+	{
+		// start our re-attempt timer
+		NSLog(@"[DEBUG] attempt to send analytics event but no network. will try again in %d seconds",TI_DB_RETRY_INTERVAL_IN_SEC);
+		retryTimer = [[NSTimer timerWithTimeInterval:TI_DB_RETRY_INTERVAL_IN_SEC target:self selector:@selector(backgroundFlushEventQueue) userInfo:nil repeats:YES] retain];
+		[[NSRunLoop mainRunLoop] addTimer:retryTimer forMode:NSDefaultRunLoopMode];
+	}
+	
+	if (flushTimer!=nil)
+	{
+		[flushTimer invalidate];
+		RELEASE_TO_NIL(flushTimer);
+	}
+	[lock unlock];
 }
 
 -(void)flushEventQueue
 {
 	NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-	[lock lock];
+	if (![lock tryLock]) {
+		// We're currently in the middle of flushing the event queue, but didn't block on actually ADDING an event -
+		// this means that we don't need to run a second flush.
+		[pool release];
+		return;
+	}
 	
-	id online = [[self network] valueForKey:@"online"];
+	// Can't use network module since pageContext/host may have shut down when sending 'final' events,
+	// giving us bad reachability info.
+	NetworkStatus status = [[Reachability reachabilityForInternetConnection] currentReachabilityStatus];
 	
 	// when we can't reach the network, we need to log our attempt, 
 	// set a retry timer and just bail...
-	
-	if ([TiUtils boolValue:online]==NO)
+	if (status != ReachableViaWiFi && status != ReachableViaWWAN)
 	{
-		NSError *error = nil;
-
-		[database beginTransaction];
-		
-		// get the number of attempts
-		PLSqliteResultSet *rs = (PLSqliteResultSet*)[database executeQuery:@"select attempts from last_attempt"];
-		BOOL found = [rs next];
-		int count = found ? [rs intForColumn:@"attempts"] : 0;
-		[rs close];
-		
-		if (count == TI_DB_WARN_ON_ATTEMPT_COUNT)
-		{
-			NSLog(@"[ERROR] %d analytics events attempted with no luck",count);
-		}
-		
-		NSString *sql = count == 0 ? @"insert into last_attempt VALUES (?,?)" : @"update last_attempt set date = ?, attempts = ?";
-		PLSqlitePreparedStatement * statement = (PLSqlitePreparedStatement *) [database prepareStatement:sql error:&error];
-		[statement bindParameters:[NSArray arrayWithObjects:[NSDate date],NUMINT(count+1),nil]];
-		[statement executeUpdate];
-		[database commitTransaction];
-		
-		[statement close];
-		
-		if (retryTimer==nil)
-		{
-			// start our re-attempt timer
-			NSLog(@"[DEBUG] attempt to send analytics event but no network. will try again in %d seconds",TI_DB_RETRY_INTERVAL_IN_SEC);
-			retryTimer = [[NSTimer timerWithTimeInterval:TI_DB_RETRY_INTERVAL_IN_SEC target:self selector:@selector(backgroundFlushEventQueue) userInfo:nil repeats:YES] retain];
-			[[NSRunLoop mainRunLoop] addTimer:retryTimer forMode:NSDefaultRunLoopMode];
-		}
-		
-		if (flushTimer!=nil)
-		{
-			[flushTimer invalidate];
-			RELEASE_TO_NIL(flushTimer);
-		}
-		
+		[self requeueEventsOnTimer];
 		[lock unlock];
 		[pool release];
+		pool = nil;
 		return;
 	}
 
@@ -150,17 +170,37 @@ NSString * const TI_DB_VERSION = @"1";
 		RELEASE_TO_NIL(flushTimer);
 	}
 	
+	// We have a TOTAL of 5s to complete on shutdown, so take up as little of it as possible with analytics -
+	// analytics should be on the main thread only during shutdown (and if it is on the main thread otherwise we
+	// want it to not block)
+	NSTimeInterval timeout = [NSThread isMainThread] ? 2 : 5;
+	
+	//... And of course, if we're on a background timer, take up even less.  We want this to complete
+	// before the expiration date, one way or another.
+	// TODO: Documentation is vague about this - can we ever be shutting down AND in the background state,
+	// at the same time?
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_4_0
+	if ([TiUtils isIOS4OrGreater] && [[UIApplication sharedApplication] applicationState] == UIApplicationStateBackground) {
+		timeout = [[UIApplication sharedApplication] backgroundTimeRemaining] * 0.75; // Give us a good chunk of time to complete
+	}
+#endif
 	[database beginTransaction];
 	
 	NSMutableArray *data = [NSMutableArray array];
 	
-	SBJSON *json = [[SBJSON alloc] init];
+	SBJSON *json = [[[SBJSON alloc] init] autorelease];
 	
 	PLSqliteResultSet *rs = (PLSqliteResultSet*)[database executeQuery:@"SELECT data FROM pending_events"];
 	while ([rs next])
 	{
 		NSString *event = [rs stringForColumn:@"data"];
-		id frag = [json fragmentWithString:event error:nil];
+		NSError* jsonError = nil;
+		id frag = [json fragmentWithString:event error:&jsonError];
+		if (jsonError) {
+			NSLog(@"[ERROR] Problem sending analytics: %@", [jsonError localizedDescription]);
+			NSLog(@"[ERROR] Dropped event was: %@", event);
+			continue;
+		}
 		[data addObject:frag];
 	}
 	[rs close];
@@ -172,12 +212,12 @@ NSString * const TI_DB_VERSION = @"1";
 		url = [[NSURL URLWithString:kTiAnalyticsUrl] retain];
 	}
 	
-	ASIHTTPRequest *request = [ASIHTTPRequest requestWithURL:url];
+	ASIHTTPRequest* request = [ASIHTTPRequest requestWithURL:url];
 	[request setRequestMethod:@"POST"];
 	[request addRequestHeader:@"Content-Type" value:@"text/json"];
 	[request addRequestHeader:@"User-Agent" value:[[TiApp app] userAgent]];
 	//TODO: need to update backend to accept compressed bodies. When done, use [request setShouldCompressRequestBody:YES]
-	[request setTimeOutSeconds:5];
+	[request setTimeOutSeconds:timeout];
 	[request setShouldPresentAuthenticationDialog:NO];
 	[request setUseSessionPersistence:NO];
 	[request setUseCookiePersistence:YES];
@@ -190,7 +230,19 @@ NSString * const TI_DB_VERSION = @"1";
 	{
 		// run synchronous ... we are either in a sync call or
 		// we're on a background timer thread
-		[request start];
+		[request startSynchronous];
+		
+		NSError* error = [request error];
+		if (error != nil) {
+			NSLog(@"[ERROR] Analytics error sending request: %@", [error localizedDescription]);
+			NSLog(@"[ERROR] Will re-queue analytics");
+			[database rollbackTransaction];
+			[self requeueEventsOnTimer];
+			[lock unlock];
+			[pool release];
+			pool = nil;
+			return;
+		}
 		
 		NSData *data = [request responseData];
 		if (data!=nil && [data length]>0) 
@@ -216,15 +268,39 @@ NSString * const TI_DB_VERSION = @"1";
 		NSLog(@"[ERROR] error sending analytics. %@",e);
 		[database rollbackTransaction];
 	}
-	[json release];
-	
 	[lock unlock];
 	[pool release];
 	pool = nil;
 }
 
+// --- ONLY CALL THIS FUNCTION IN IOS4 OR THERE WILL BE A DYLIB PANIC WHEN IT TRIES TO DEALLOC THE __BLOCK VARIABLE ---
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_4_0
+-(void)flushEventQueueWrapper
+{
+	NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+	__block UIBackgroundTaskIdentifier backgroundId = UIBackgroundTaskInvalid;
+	
+	// If we're calling the method outside iOS 4 we have bigger problems, so don't even perform that check here.
+	if ([[UIApplication sharedApplication] applicationState] == UIApplicationStateBackground) 
+	{
+		backgroundId = [[UIApplication sharedApplication] beginBackgroundTaskWithExpirationHandler:^{
+			[[UIApplication sharedApplication] endBackgroundTask:backgroundId];
+			backgroundId = UIBackgroundTaskInvalid;
+		}];
+	}
+	
+	[self flushEventQueue];
+	
+	if (backgroundId != UIBackgroundTaskInvalid) {
+		[[UIApplication sharedApplication] endBackgroundTask:backgroundId];
+	}
+	[pool release];
+}
+#endif
+
 -(void)startFlushTimer
 {
+	// TODO: Race condition central
 	if (flushTimer==nil)
 	{
 		flushTimer = [[NSTimer timerWithTimeInterval:TI_DB_FLUSH_INTERVAL_IN_SEC target:self selector:@selector(backgroundFlushEventQueue) userInfo:nil repeats:NO] retain];
@@ -275,7 +351,6 @@ NSString * const TI_DB_VERSION = @"1";
 		[dict setObject:remoteDeviceUUID forKey:@"rdu"];
 	}
 
-	
 	id value = [SBJSON stringify:dict];
 	
 	NSString *sql = [NSString stringWithFormat:@"INSERT INTO pending_events VALUES (?)"];
@@ -294,7 +369,12 @@ NSString * const TI_DB_VERSION = @"1";
 	if (immediate)
 	{	
 		// if immediate we send right now
-		[self flushEventQueue];
+		if ([TiUtils isIOS4OrGreater]) {
+			[self flushEventQueueWrapper];
+		}
+		else {
+			[self flushEventQueue];
+		}
 	}
 	else
 	{
@@ -457,7 +537,7 @@ NSString * const TI_DB_VERSION = @"1";
 
 	AnalyticsStarted = YES;
 	
-	WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+	WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
 	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(analyticsEvent:) name:kTiAnalyticsNotification object:nil];
 	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(remoteDeviceUUIDChanged:) name:kTiRemoteDeviceUUIDNotification object:nil];
 	
@@ -470,7 +550,7 @@ NSString * const TI_DB_VERSION = @"1";
 	if (TI_APPLICATION_ANALYTICS)
 	{
 		[self queueEvent:@"ti.end" name:@"ti.end" data:nil immediate:YES];
-		WARN_IF_BACKGROUND_THREAD;	//NSNotificationCenter is not threadsafe!
+		WARN_IF_BACKGROUND_THREAD_OBJ;	//NSNotificationCenter is not threadsafe!
 		[[NSNotificationCenter defaultCenter] removeObserver:self name:kTiAnalyticsNotification object:nil];
 		[[NSNotificationCenter defaultCenter] removeObserver:self name:kTiRemoteDeviceUUIDNotification object:nil];
 	}

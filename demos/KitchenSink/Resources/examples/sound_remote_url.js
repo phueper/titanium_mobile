@@ -161,10 +161,12 @@ var flexSpace = Titanium.UI.createButton({
 var pb = Titanium.UI.createProgressBar({
 	min:0,
 	value:0,
-	width:200,
+	width:200
 });
 
-win.setToolbar([flexSpace,pb,flexSpace]);
+if (Ti.Platform.name != 'android') {
+	win.setToolbar([flexSpace,pb,flexSpace]);
+}
 pb.show();
 
 //
@@ -174,7 +176,7 @@ var i = setInterval(function()
 {
 	if (sound.isPlaying())
 	{
-		Ti.API.info('time ' + sound.time)
+		Ti.API.info('time ' + sound.time);
 		pb.value = sound.time;
 
 	}

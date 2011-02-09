@@ -195,6 +195,14 @@ NSString * const kTitaniumJavascript = @"Ti.App={};Ti.API={};Ti.App._listeners={
 	// attempt to make well-formed HTML and inject in our Titanium bridge code
 	// However, we only do this if the content looks like HTML
 	NSRange range = [content rangeOfString:@"<html"];
+	if (range.location==NSNotFound)
+	{
+		//TODO: Someone did a DOCTYPE, and our search wouldn't find it. This search is tailored for him
+		//to cause the bug to go away, but is this really the right thing to do? Shouldn't we have a better
+		//way to check?
+		range = [content rangeOfString:@"<!DOCTYPE html"];
+	}
+
 	if (range.location!=NSNotFound)
 	{
 		[self prepareInjection];
@@ -610,6 +618,22 @@ NSString * const kTitaniumJavascript = @"Ti.App={};Ti.API={};Ti.App._listeners={
 
 - (BOOL)webView:(UIWebView *)webView shouldStartLoadWithRequest:(NSURLRequest *)request navigationType:(UIWebViewNavigationType)navigationType
 {
+	NSURL * newUrl = [request URL];
+	NSString * scheme = [[newUrl scheme] lowercaseString];
+	if ([scheme hasPrefix:@"http"] || [scheme hasPrefix:@"app"] || [scheme hasPrefix:@"file"] || [scheme hasPrefix:@"ftp"])
+	{
+		return YES;
+	}
+	
+	UIApplication * uiApp = [UIApplication sharedApplication];
+	
+	if ([uiApp canOpenURL:newUrl])
+	{
+		[uiApp openURL:newUrl];
+		return NO;
+	}
+	
+	//It's likely to fail, but that way we pass it on to error handling.
 	return YES;
 }
 
@@ -640,8 +664,7 @@ NSString * const kTitaniumJavascript = @"Ti.App={};Ti.API={};Ti.App._listeners={
 	}
 	
 	TiViewProxy * ourProxy = (TiViewProxy *)[self proxy];
-	
-	[ourProxy setNeedsRepositionIfAutoSized];
+	[ourProxy contentsWillChange];
 }
 
 - (void)webView:(UIWebView *)webView didFailLoadWithError:(NSError *)error

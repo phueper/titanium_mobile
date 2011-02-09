@@ -38,34 +38,46 @@ extern NSString * const TI_APPLICATION_RESOURCE_DIR;
 	static CGFloat scale = 0.0;
 	if (scale == 0.0)
 	{
+#if __IPHONE_3_2 <= __IPHONE_OS_VERSION_MAX_ALLOWED
+// NOTE: iPad in iPhone compatibility mode will return a scale factor of 2.0
+// when in 2x zoom, which leads to false positives and bugs. This tries to
+// future proof against possible different model names, but in the event of
+// an iPad with a retina display, this will need to be fixed.
+// Credit to Brion on github for the origional fix.
+		if(UI_USER_INTERFACE_IDIOM()==UIUserInterfaceIdiomPhone)
+		{
+			NSRange iPadStringPosition = [[[UIDevice currentDevice] model] rangeOfString:@"iPad"];
+			if(iPadStringPosition.location != NSNotFound)
+			{
+				scale = 1.0;
+				return NO;
+			}
+		}
+#endif
 #if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_4_0
 		if ([[UIScreen mainScreen] respondsToSelector:@selector(scale)])
 		{
-			scale = [UIScreen mainScreen].scale;
+			scale = [[UIScreen mainScreen] scale];
 		}
-#endif	
+#endif
 	}
 	return scale > 1.0;
 }
 
++(BOOL)isIOS4_2OrGreater
+{
+	return [UIView instancesRespondToSelector:@selector(drawRect:forViewPrintFormatter:)];
+}
 
 +(BOOL)isIOS4OrGreater
 {
-#if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_4_0
 	return [UIView instancesRespondToSelector:@selector(contentScaleFactor)];
-#else
-	return NO;
-#endif
 }
 
 +(BOOL)isiPhoneOS3_2OrGreater
 {
-#if __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_3_2
 	// Here's a cheap way to test for 3.2; does it respond to a selector that was introduced with that version?
 	return [[UIApplication sharedApplication] respondsToSelector:@selector(setStatusBarHidden:withAnimation:)];
-#else
-	return NO;
-#endif
 }
 
 +(BOOL)isIPad
@@ -404,7 +416,7 @@ extern NSString * const TI_APPLICATION_RESOURCE_DIR;
 		}
 		if (!CGSizeEqualToSize(newSize, imageSize))
 		{
-			image = [UIImageResize resizedImage:newSize interpolationQuality:kCGInterpolationDefault image:image];
+			image = [UIImageResize resizedImage:newSize interpolationQuality:kCGInterpolationDefault image:image hires:NO];
 		}
 	}
 	return image;
@@ -489,7 +501,7 @@ extern NSString * const TI_APPLICATION_RESOURCE_DIR;
 }
 
 const CFStringRef charactersThatNeedEscaping = NULL;
-const CFStringRef charactersToNotEscape = CFSTR(":[]@!$ '()*+,;\"<>%{}|\\^~`");
+const CFStringRef charactersToNotEscape = CFSTR(":[]@!$ '()*+,;\"<>%{}|\\^~`#");
 
 +(NSURL*)toURL:(id)object proxy:(TiProxy*)proxy
 {
@@ -563,7 +575,7 @@ const CFStringRef charactersToNotEscape = CFSTR(":[]@!$ '()*+,;\"<>%{}|\\^~`");
 
 +(int)intValue:(NSString*)name properties:(NSDictionary*)properties def:(int)def exists:(BOOL*) exists
 {
-	if (properties != nil)
+	if ([properties isKindOfClass:[NSDictionary class]])
 	{
 		id value = [properties objectForKey:name];
 		if ([value respondsToSelector:@selector(intValue)])
@@ -578,7 +590,7 @@ const CFStringRef charactersToNotEscape = CFSTR(":[]@!$ '()*+,;\"<>%{}|\\^~`");
 
 +(double)doubleValue:(NSString*)name properties:(NSDictionary*)properties def:(double)def exists:(BOOL*) exists
 {
-	if (properties != nil)
+	if ([properties isKindOfClass:[NSDictionary class]])
 	{
 		id value = [properties objectForKey:name];
 		if ([value respondsToSelector:@selector(doubleValue)])
@@ -593,7 +605,7 @@ const CFStringRef charactersToNotEscape = CFSTR(":[]@!$ '()*+,;\"<>%{}|\\^~`");
 
 +(float)floatValue:(NSString*)name properties:(NSDictionary*)properties def:(float)def exists:(BOOL*) exists
 {
-	if (properties != nil)
+	if ([properties isKindOfClass:[NSDictionary class]])
 	{
 		id value = [properties objectForKey:name];
 		if ([value respondsToSelector:@selector(floatValue)])
@@ -608,7 +620,7 @@ const CFStringRef charactersToNotEscape = CFSTR(":[]@!$ '()*+,;\"<>%{}|\\^~`");
 
 +(BOOL)boolValue:(NSString*)name properties:(NSDictionary*)properties def:(BOOL)def exists:(BOOL*) exists
 {
-	if (properties != nil)
+	if ([properties isKindOfClass:[NSDictionary class]])
 	{
 		id value = [properties objectForKey:name];
 		if ([value respondsToSelector:@selector(boolValue)])
@@ -623,7 +635,7 @@ const CFStringRef charactersToNotEscape = CFSTR(":[]@!$ '()*+,;\"<>%{}|\\^~`");
 
 +(NSString*)stringValue:(NSString*)name properties:(NSDictionary*)properties def:(NSString*)def exists:(BOOL*) exists
 {
-	if (properties != nil)
+	if ([properties isKindOfClass:[NSDictionary class]])
 	{
 		id value = [properties objectForKey:name];
 		if ([value isKindOfClass:[NSString class]])
@@ -648,7 +660,7 @@ const CFStringRef charactersToNotEscape = CFSTR(":[]@!$ '()*+,;\"<>%{}|\\^~`");
 
 +(CGPoint)pointValue:(NSString*)name properties:(NSDictionary*)properties def:(CGPoint)def exists:(BOOL*) exists
 {
-	if (properties != nil)
+	if ([properties isKindOfClass:[NSDictionary class]])
 	{
 		id value = [properties objectForKey:name];
 		if ([value isKindOfClass:[NSDictionary class]])
@@ -669,7 +681,7 @@ const CFStringRef charactersToNotEscape = CFSTR(":[]@!$ '()*+,;\"<>%{}|\\^~`");
 +(TiColor*)colorValue:(NSString*)name properties:(NSDictionary*)properties def:(TiColor*)def exists:(BOOL*) exists
 {
 	TiColor * result = nil;
-	if (properties != nil)
+	if ([properties isKindOfClass:[NSDictionary class]])
 	{
 		id value = [properties objectForKey:name];
 		if (value == [NSNull null])
@@ -699,7 +711,7 @@ const CFStringRef charactersToNotEscape = CFSTR(":[]@!$ '()*+,;\"<>%{}|\\^~`");
 
 +(TiDimension)dimensionValue:(NSString*)name properties:(NSDictionary*)properties def:(TiDimension)def exists:(BOOL*) exists
 {
-	if (properties != nil)
+	if ([properties isKindOfClass:[NSDictionary class]])
 	{
 		id value = [properties objectForKey:name];
 		if (value != nil)
@@ -925,6 +937,9 @@ const CFStringRef charactersToNotEscape = CFSTR(":[]@!$ '()*+,;\"<>%{}|\\^~`");
 	return arg;
 }
 
+#define RETURN_IF_ORIENTATION_STRING(str,orientation) \
+if ([str isEqualToString:@#orientation]) return orientation;
+
 +(UIDeviceOrientation)orientationValue:(id)value def:(UIDeviceOrientation)def
 {
 	if ([value isKindOfClass:[NSString class]])
@@ -937,6 +952,11 @@ const CFStringRef charactersToNotEscape = CFSTR(":[]@!$ '()*+,;\"<>%{}|\\^~`");
 		{
 			return UIInterfaceOrientationLandscapeRight;
 		}
+		
+		RETURN_IF_ORIENTATION_STRING(value,UIInterfaceOrientationPortrait)
+		RETURN_IF_ORIENTATION_STRING(value,UIInterfaceOrientationPortraitUpsideDown)
+		RETURN_IF_ORIENTATION_STRING(value,UIInterfaceOrientationLandscapeLeft)
+		RETURN_IF_ORIENTATION_STRING(value,UIInterfaceOrientationLandscapeRight)
 	}
 
 	if ([value respondsToSelector:@selector(intValue)])

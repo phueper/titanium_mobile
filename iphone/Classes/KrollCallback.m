@@ -32,6 +32,15 @@ static NSLock *callbackLock;
 	[callbackLock unlock];
 }
 
++(void)initialize
+{
+	if (callbacks==nil)
+	{
+		callbackLock = [[NSLock alloc] init];
+		callbacks = TiCreateNonRetainingArray();
+	}
+}
+
 -(id)initWithCallback:(TiValueRef)function_ thisObject:(TiObjectRef)thisObject_ context:(KrollContext*)context_
 {
 	if (self = [super init])
@@ -42,11 +51,7 @@ static NSLock *callbackLock;
 		thisObj = thisObject_;
 		TiValueProtect(jsContext, function);
 		TiValueProtect(jsContext, thisObj);
-		if (callbacks==nil)
-		{
-			callbackLock = [[NSLock alloc] init];
-			callbacks = TiCreateNonRetainingArray();
-		}
+		contextLock = [[NSLock alloc] init];
 		[callbacks addObject:self];
 	}
 	return self;
@@ -59,6 +64,8 @@ static NSLock *callbackLock;
 	[callbackLock unlock];
 
 	[type release];
+	[contextLock release];
+	
 	TiValueUnprotect(jsContext, function);
 	TiValueUnprotect(jsContext, thisObj);
 	function = NULL;
@@ -73,32 +80,44 @@ static NSLock *callbackLock;
 	{
 		return YES;
 	}
-	if (anObject == nil)
-	{
-		return NO;
-	}
-	if ([anObject isKindOfClass:[KrollCallback class]]==NO)
+	if ((anObject == nil) || ![anObject isKindOfClass:[KrollCallback class]])
 	{
 		return NO;
 	}
 	KrollCallback *otherCallback = (KrollCallback*)anObject;
 	if (function!=NULL)
-	{
+	{	//TODO: Is this threadsafe? (IE, what if one's marked for GC?)
+		//If it is, then ref2 can't be == ref1, because ref1 is owned by us
+		//And therefore, protected from GC.
 		TiObjectRef ref1 = function;
 		TiObjectRef ref2 = [otherCallback function];
+		if (ref2 == ref1)
+		{
+			return YES;
+		}
+#ifdef VERBOSE
+		BOOL result = TiValueIsStrictEqual(jsContext,ref1,ref2);
+		if (result)
+		{
+			NSLog(@"%X and %X were found to be equal despite different pointers!",ref1,ref2);
+		}
+#else
 		return TiValueIsStrictEqual(jsContext,ref1,ref2);
+#endif
 	}
 	return NO;
 }
 
 -(id)call:(NSArray*)args thisObject:(id)thisObject_
 {
+	[contextLock lock];
 	if (context==nil)
 	{
+		[contextLock unlock];
 		return nil;
 	}
 	
-	[[context retain] autorelease];
+	[context retain];
 	
 	TiValueRef _args[[args count]];
 	for (size_t c = 0; c < [args count]; c++)
@@ -132,7 +151,10 @@ static NSLock *callbackLock;
 		TiValueUnprotect(jsContext,top);
 	}
 	
-	return [KrollObject toID:context value:retVal];
+	id val = [KrollObject toID:context value:retVal];
+	[context release];
+	[contextLock unlock];
+	return val;
 }
 
 -(TiObjectRef)function
@@ -143,6 +165,13 @@ static NSLock *callbackLock;
 -(KrollContext*)context
 {
 	return context;
+}
+
+-(void)setContext:(KrollContext*)context_
+{
+	[contextLock lock];
+	context = context_;
+	[contextLock unlock];
 }
 
 @end

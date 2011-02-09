@@ -29,7 +29,7 @@ typedef enum
 #define TI_ORIENTATION_ALLOWED(flag,bit)	(flag & (1<<bit))
 #define TI_ORIENTATION_SET(flag,bit)		(flag |= (1<<bit))
 
-@protocol TiOrientationController
+@protocol TiOrientationController <NSObject>
 
 @property(nonatomic,readwrite,assign)	id<TiOrientationController> parentOrientationController;
 @property(nonatomic,readonly,assign)	TiOrientationFlags orientationFlags;
@@ -63,7 +63,7 @@ TiOrientationFlags TiOrientationFlagsFromObject(id args);
 	UIView *closeView;
 	UIViewController *tempController;
 
-	id<TiOrientationController> parentOrientationController;
+	NSObject<TiOrientationController> * parentOrientationController;
 	TiOrientationFlags orientationFlags;
 }
 

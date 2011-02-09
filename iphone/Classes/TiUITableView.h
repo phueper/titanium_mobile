@@ -22,7 +22,10 @@
 	TiGradientLayer * gradientLayer;
 	TiGradient * backgroundGradient;
 	TiGradient * selectedBackgroundGradient;
+	CGPoint hitPoint;
 }
+@property (nonatomic,readonly) CGPoint hitPoint;
+@property (nonatomic,readonly) TiUITableViewRowProxy* proxy;
 
 -(id)initWithStyle:(UITableViewCellStyle)style_ reuseIdentifier:(NSString *)reuseIdentifier_ row:(TiUITableViewRowProxy*)row_;
 
@@ -30,6 +33,8 @@
 
 -(void) setBackgroundGradient_:(TiGradient *)newGradient;
 -(void) setSelectedBackgroundGradient_:(TiGradient *)newGradient;
+
+-(void) updateGradientLayer:(BOOL)useSelected;
 
 @end
 
@@ -71,7 +76,7 @@
 -(TiUITableViewRowProxy*)rowForIndex:(NSInteger)index section:(NSInteger*)section;
 -(void)updateSearchView;
 -(NSMutableArray*)sections;
--(void)replaceData:(UITableViewRowAnimation)animation;
+-(void)replaceData:(NSArray*)data animation:(UITableViewRowAnimation)animation;
 
 -(void)dispatchAction:(TiUITableViewAction*)action;
 -(void)scrollToIndex:(NSInteger)index position:(UITableViewScrollPosition)position animated:(BOOL)animated;
@@ -80,6 +85,7 @@
 -(IBAction)hideSearchScreen:(id)sender;
 -(UITableView*)searchTableView;
 -(UITableView*)tableView;
+
 
 @end
 

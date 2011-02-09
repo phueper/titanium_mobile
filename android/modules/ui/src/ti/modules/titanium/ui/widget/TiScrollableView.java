@@ -8,7 +8,7 @@ package ti.modules.titanium.ui.widget;
 
 import java.util.ArrayList;
 
-import org.appcelerator.titanium.TiDict;
+import org.appcelerator.kroll.KrollDict;
 import org.appcelerator.titanium.proxy.TiViewProxy;
 import org.appcelerator.titanium.util.Log;
 import org.appcelerator.titanium.util.TiAnimationFactory;
@@ -19,7 +19,6 @@ import org.appcelerator.titanium.view.TiCompositeLayout;
 
 import ti.modules.titanium.ui.ScrollableViewProxy;
 import android.content.Context;
-import android.graphics.Color;
 import android.os.Handler;
 import android.view.GestureDetector;
 import android.view.KeyEvent;
@@ -88,13 +87,14 @@ public class TiScrollableView extends TiCompositeLayout
 
 	public TiScrollableView(ScrollableViewProxy proxy, Handler handler)
 	{
-		super(proxy.getContext(), false);
+		super(proxy.getContext());
 
 		this.proxy = proxy;
 		this.handler = handler;
 		me = this;
 		showPagingControl = true;
-
+		views = new ArrayList<TiViewProxy>();
+		
 		//below this was in "doOpen"
 		//setLayoutParams(new FrameLayout.LayoutParams(LayoutParams.FILL_PARENT, LayoutParams.FILL_PARENT));
 		setFocusable(true);
@@ -278,8 +278,8 @@ public class TiScrollableView extends TiCompositeLayout
 				gallery.setDisplayedChild(to);
 				TiEventHelper.fireUnfocused(views.get(to));
 				onScrolled(from, to);
-				if (pager.getVisibility() == View.VISIBLE) {
-					proxy.setPagerTimeout();
+				if (showPagingControl) {
+					showPager();
 				}
 			}
 //		}
@@ -312,8 +312,8 @@ public class TiScrollableView extends TiCompositeLayout
 				gallery.setDisplayedChild(to);
 				TiEventHelper.fireUnfocused(views.get(to));
 				onScrolled(from, to);
-				if (pager.getVisibility() == View.VISIBLE) {
-					proxy.setPagerTimeout();
+				if (showPagingControl) {
+					showPager();
 				}
 			}
 //		}
@@ -332,6 +332,7 @@ public class TiScrollableView extends TiCompositeLayout
 		}
 
 		pager.setVisibility(View.VISIBLE);
+		proxy.setPagerTimeout();
 	}
 
 	public void hidePager() {
@@ -369,7 +370,7 @@ public class TiScrollableView extends TiCompositeLayout
 			}
 			if (views.length > 0) {
 				((ViewWrapper) gallery.getChildAt(0)).doAttachView();
-				((TiViewProxy)views[0]).show(new TiDict());
+				((TiViewProxy)views[0]).show(new KrollDict());
 			}
 		}
 	}
@@ -394,6 +395,12 @@ public class TiScrollableView extends TiCompositeLayout
 				}
 			} else {
 				gallery.removeViewAt(index);
+				
+				// really for safety sake, you could just loop through all view resetting the position
+				// but for the sake of performance, just run over affected views for now
+				for (int i = index; i < gallery.getChildCount(); i++) {
+					((ViewWrapper) gallery.getChildAt (i)).position = i;
+				}
 			}
 		}
 	}
@@ -434,11 +441,14 @@ public class TiScrollableView extends TiCompositeLayout
 				gallery.setInAnimation(null);
 				gallery.setOutAnimation(null);
 				gallery.setDisplayedChild(position);
-				proxy.internalSetDynamicValue("currentPage", position, false);
+				proxy.setProperty("currentPage", position);
 				proxy.fireScroll(position);
 
 				if (fromWrapper != null && (fromWrapper != toWrapper)) {
 					fromWrapper.doDetachView();
+				}
+				if (showPagingControl) {
+					showPager();
 				}
 			}
 		}
@@ -510,7 +520,7 @@ public class TiScrollableView extends TiCompositeLayout
 		if (v != null) {
 			v.setVisibility(hasNext() ? View.VISIBLE : View.INVISIBLE);
 		}
-		proxy.internalSetDynamicValue("currentPage", to, false);
+		proxy.setProperty("currentPage", to);
 	}
 
 	public void onNothingSelected(AdapterView<?> view)

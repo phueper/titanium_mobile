@@ -10,11 +10,12 @@ import java.lang.ref.SoftReference;
 import java.util.concurrent.RejectedExecutionException;
 
 import org.appcelerator.titanium.TiContext;
+import org.appcelerator.titanium.TiDimension;
+import org.appcelerator.titanium.view.TiDrawableReference;
+import org.appcelerator.titanium.view.TiDrawableReference.Bounds;
 
-import android.graphics.Bitmap;
-import android.graphics.drawable.BitmapDrawable;
-import android.graphics.drawable.Drawable;
 import android.os.AsyncTask;
+import android.view.View;
 
 /**
  *
@@ -24,26 +25,28 @@ import android.os.AsyncTask;
  *
  */
 public abstract class TiBackgroundImageLoadTask
-	extends AsyncTask<String, Long, Drawable>
+	extends AsyncTask<String, Long, Boolean>
 {
 	private static final String LCAT = "TiBackgroundImageLoadTask";
 	private static final boolean DBG = TiConfig.LOGD;
 
 	protected SoftReference<TiContext> softTiContext;
-	protected Integer imageHeight;
-	protected Integer imageWidth;
 
-	private String url;
-
-	public TiBackgroundImageLoadTask(TiContext tiContext, Integer imageWidth, Integer imageHeight)
+	public TiBackgroundImageLoadTask(TiContext tiContext)
 	{
 		this.softTiContext = new SoftReference<TiContext>(tiContext);
 	}
 
 	@Override
-	protected Drawable doInBackground(String... arg) {
+	protected Boolean doInBackground(String... arg) {
 
-		Drawable d = null;
+		if (arg.length == 0) {
+			Log.w(LCAT, "url argument is missing.  Returning null drawable");
+			return null;
+		}
+		
+		String url = arg[0];
+		boolean downloaded = false;
 		TiContext context = softTiContext.get();
 		if (context == null) {
 			if (DBG) {
@@ -51,48 +54,20 @@ public abstract class TiBackgroundImageLoadTask
 			}
 			return null;
 		}
-		url = context.resolveUrl(null, arg[0]);
-
+		
+		TiDrawableReference ref = TiDrawableReference.fromUrl(context, 	url);
+		
 		boolean retry = true;
 		int retryCount = 3;
-
-		TiFileHelper tfh = new TiFileHelper(context.getTiApp());
 
 		while(retry) {
 			retry = false;
 
-			try {
-				d = tfh.loadDrawable(url, false);
-				if (d != null) {
-					BitmapDrawable bd = (BitmapDrawable) d;
-					Bitmap bitmap = bd.getBitmap();
-					if (bitmap != null) {
-						int w = bitmap.getWidth();
-						int h = bitmap.getHeight();
-	
-						if (imageHeight != null || imageWidth != null) {
-							if (imageWidth != null) {
-								w = imageWidth;
-							}
-							if (imageHeight != null) {
-								h = imageHeight;
-							}
-							Bitmap scaledBitmap = Bitmap.createScaledBitmap(bitmap, w, h, true);
-							bitmap.recycle();
-							d = new BitmapDrawable(scaledBitmap);
-						}
-					} else {
-						if (DBG) {
-							Log.d(LCAT, "BitmapDrawable.getBitmap() (url '" + url + "') returned null");
-						}
-						return null;
-					}
-
-				} else {
-					Log.w(LCAT, "Unable to load image from " + url);
-				}
-			} catch (OutOfMemoryError e) {
-				Log.e(LCAT, "Not enough memory left to load image: " + url + " : " + e.getMessage());
+			Bounds bounds = ref.peakBounds();
+			if (bounds.getWidth() > 0 && bounds.getHeight() > 0) {
+				downloaded = true;
+			} else if (ref.outOfMemoryOccurred()) {
+				Log.e(LCAT, "Not enough memory left to load image: " + url);
 				retryCount -= 1;
 				if (retryCount > 0) {
 					retry = true;
@@ -105,10 +80,16 @@ public abstract class TiBackgroundImageLoadTask
 					}
 					Log.i(LCAT, "Retry #" + (3 - retryCount) + " for " + url);
 				}
+				
+			} else {
+				// ref.getBitmap() returned null and it wasn't because of OOM
+				if (DBG) {
+					Log.d(LCAT, "TiDrawableReference.getBitmap() (url '" + url + "') returned null");
+				}
 			}
 		}
-
-		return d;
+		
+		return downloaded;
 	}
 
 	public void load(String url) {
