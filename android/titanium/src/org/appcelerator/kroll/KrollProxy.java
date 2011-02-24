@@ -8,6 +8,7 @@ package org.appcelerator.kroll;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -659,7 +660,18 @@ public class KrollProxy
 	@Kroll.method
 	public String toString()
 	{
-		return "[Ti."+getAPIName() + "]";
+		String rval = "[Ti."+getAPIName() + ":";
+		Iterator<String> it = getProperties().keySet().iterator();
+		while (it.hasNext()) {
+			String key = it.next();
+			Object val = getProperties().get(key);
+			rval += key + "=>" +val;
+			if (it.hasNext()) {
+				rval += ", ";
+			}
+		}
+		rval += "]"; 
+		return rval;
 	}
 	
 	public Object getDefaultValue(Class<?> typeHint)
