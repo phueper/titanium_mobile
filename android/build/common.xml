@@ -70,7 +70,11 @@ Common ant tasks and macros for building Android-based Titanium modules and proj
 			<property name="google.apis" location="${android.sdk}/add-ons/google_apis-4_r02"/>
 		</else>
 	</if>
-
+	
+	<echo level="info">Android SDK: ${android.sdk}</echo>
+	<echo level="info">Android Platform: ${android.platform}</echo>
+	<echo level="info">Google APIs: ${google.apis}</echo>
+	
 	<path id="android">
 		<pathelement path="${android.platform}/android.jar"/>
 		<pathelement path="${google.apis}/libs/maps.jar"/>
